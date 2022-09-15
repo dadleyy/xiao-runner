@@ -2,7 +2,8 @@
 #include "WiFi.h"
 #include "Adafruit_NeoPixel.h"
 #include "esp_now.h"
-#include <variant>
+
+#include "engine.hpp"
 
 //
 // Beetle Lights
@@ -17,97 +18,16 @@ constexpr const uint32_t num_pixels = 280;
 constexpr const uint32_t pixel_pin = 27;
 constexpr const uint32_t busy_pin = 2;
 
+// globals.
 struct MessagePayload {
   char content[120];
 };
-
 MessagePayload frame_payload;
-
-uint32_t led_index = 0;
 bool setup_complete = false;
-
-// 0 -> none
-// 1 -> left
-// 2 -> right
-uint8_t direction = 0;
-
-struct Blinker final {
-  explicit Blinker(uint32_t pos): origin(pos), position(pos), direction(1) {};
-
-  Blinker(Blinker&) = delete;
-  Blinker& operator=(Blinker&) = delete;
-
-  Blinker(Blinker&& other): origin(other.origin), position(other.position), direction(other.direction) {};
-  Blinker& operator=(Blinker&& other) {
-    this->origin = other.origin;
-    this->position = other.position;
-    this->direction = other.direction;
-    return *this;
-  }
-
-  std::optional<std::pair<uint32_t, std::array<uint32_t, 3>>> update(uint32_t player_position) {
-    if (direction == 1) {
-      position = position + 1;
-    } else if (direction == 2) {
-      position = position - 1;
-    }
-
-    bool should_swap = (position > origin && position - origin > 10)
-      || (origin > position && origin - position > 10);
-
-    direction = should_swap ? (direction == 1 ? 2 : 1) : direction;
-
-    return std::make_pair(position, std::array<uint32_t, 3> { {255,0,0} });
-  }
-
-  uint32_t origin;
-  uint32_t position;
-  uint32_t direction;
-};
-
-struct Noop final {
-};
-
-struct Obstacle final {
-  Obstacle(): kind(Noop()) {};
-  explicit Obstacle(std::variant<Noop, Blinker> k): kind(std::move(k)) {};
-
-  std::variant<Noop, Blinker> kind;
-
-  std::optional<std::pair<uint32_t, std::array<uint32_t, 3>>> update(uint32_t player_position) {
-    switch (kind.index()) {
-      case 1: 
-        return std::get_if<Blinker>(&kind)->update(player_position);
-      default:
-        return std::nullopt;
-    }
-  }
-};
-
-struct Level final {
-  std::array<Obstacle, 6> obstacles;
-};
-
-//
-// Hard coded level data (for now)
-//
-
-Level levels[] = {
-  Level {
-    obstacles: {
-      Obstacle(Blinker(50)),
-      Obstacle(Blinker(80)),
-      Obstacle(Blinker(100)),
-      Obstacle(),
-      Obstacle(),
-      Obstacle()
-    }
-  }
-};
-uint8_t current_level_index = 0;
-
-// Create our LED light strip.
 Adafruit_NeoPixel pixels(num_pixels, pixel_pin);
+std::pair<uint32_t, uint32_t> last_input = std::make_pair(0, 0);
+
+Engine engine;
 
 std::pair<uint32_t, uint32_t> parse_message(const char* data, int max_len) {
   const char * head = data + 0;
@@ -144,17 +64,7 @@ std::pair<uint32_t, uint32_t> parse_message(const char* data, int max_len) {
 void receive_cb(const uint8_t * mac, const uint8_t *incoming_data, int len) {
   memset(frame_payload.content, '\0', 120);
   memcpy(&frame_payload, incoming_data, sizeof(frame_payload));
-
-  auto input_coordinates = parse_message(frame_payload.content, len);
-
-  uint32_t x_dir = std::get<0>(input_coordinates);
-  if (x_dir < 1000) {
-    direction = 1;
-  } else if (x_dir > 2000) {
-    direction = 2;
-  } else {
-    direction = 0;
-  }
+  last_input = parse_message(frame_payload.content, len);
 }
 
 void setup(void) {
@@ -187,30 +97,17 @@ void setup(void) {
 }
 
 void loop(void) {
+  auto next = engine.update(last_input, millis());
+
+  auto renderables = std::get<1>(next);
+
+  for (auto start = renderables.cbegin(); start != renderables.cend(); start++) {
+    auto led_index = std::get<0>(*start);
+    auto colors = std::get<1>(*start);
+    pixels.setPixelColor(led_index, Adafruit_NeoPixel::Color(colors[0], colors[1], colors[2]));
+  }
+
+  engine = std::move(std::get<0>(next));
   pixels.fill(Adafruit_NeoPixel::Color(0, 0, 0));
-
-  if (direction == 1) {
-    led_index = led_index < 1 ? num_pixels : led_index - 1;
-  } else if (direction == 2) {
-    led_index = led_index == num_pixels ? 0 : led_index + 1;
-  }
-
-  auto current_level = std::move(levels[current_level_index]);
-  auto obstacles = std::move(current_level.obstacles);
-
-  for (auto start = obstacles.begin(); start != obstacles.end(); start++) {
-    auto result = start->update(led_index);
-
-    if (result.has_value()) {
-      auto position = std::get<0>(*result);
-      auto color = std::get<1>(*result);
-      pixels.setPixelColor(position, Adafruit_NeoPixel::Color(color[0], color[1], color[2]));
-    }
-  }
-
-  current_level.obstacles = std::move(obstacles);
-  levels[current_level_index] = std::move(current_level);
-
-  pixels.setPixelColor(led_index, Adafruit_NeoPixel::Color(255, 255, 255));
   pixels.show();
 }
