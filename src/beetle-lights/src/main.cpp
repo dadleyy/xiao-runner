@@ -97,10 +97,9 @@ void setup(void) {
 }
 
 void loop(void) {
-  auto level_update = std::move(current_level).update(last_input, millis());
+  auto [next_level, renderables] = std::move(current_level).update(last_input, millis());
   last_input = std::nullopt;
 
-  auto renderables = std::get<1>(level_update);
   pixels.fill(Adafruit_NeoPixel::Color(0, 0, 0));
 
   if (renderables.size() > 0) {
@@ -112,7 +111,7 @@ void loop(void) {
   }
   pixels.show();
 
-  current_level = std::move(std::get<0>(level_update));
+  current_level = std::move(next_level);
   if (current_level.is_complete()) {
     log_d("new level");
     current_level = beetle_lights::Level();
