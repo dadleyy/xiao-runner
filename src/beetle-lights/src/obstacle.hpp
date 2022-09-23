@@ -4,12 +4,47 @@
 #include <variant>
 #include <vector>
 #include "timer.hpp"
+#include "direction.hpp"
 #include "player.hpp"
+#include "interaction.hpp"
 
 namespace beetle_lights {
   class Obstacle final {
+    private:
+      struct Enemy final {
+        Enemy() = default;
+        ~Enemy() = default;
+
+        Enemy(const Enemy&) = delete;
+        Enemy& operator=(const Enemy&) = delete;
+
+        Enemy(const Enemy&& other):
+          _direction(other._direction),
+          _position(other._position),
+          _origin(other._origin),
+          _movement_timer(std::move(other._movement_timer))
+          {}
+        const Enemy& operator=(const Enemy&& other) noexcept {
+          this->_direction = other._direction;
+          this->_position = other._position;
+          this->_origin = other._origin;
+          this->_movement_timer = std::move(other._movement_timer);
+          return *this;
+        }
+
+        mutable Direction _direction = Direction::LEFT;
+        mutable uint32_t _position = 0;
+        mutable uint32_t _origin = 0;
+        const Timer _movement_timer = Timer(1000);
+      };
+
+      struct Dead final {
+      };
+
+      using ObstacleKinds = std::variant<Enemy, Dead>;
+
     public:
-      explicit Obstacle(uint32_t pos): _position(pos) {}
+      explicit Obstacle(uint32_t pos): _kind(Enemy()) {}
       ~Obstacle() {}
 
       Obstacle(Obstacle&) = delete;
@@ -17,75 +52,73 @@ namespace beetle_lights {
       Obstacle(const Obstacle&) = delete;
       Obstacle& operator=(const Obstacle&) = delete;
 
-      Obstacle(const Obstacle&& other):
-        _kind(std::move(other._kind)),
-        _position(other._position)
-        {}
-
+      Obstacle(const Obstacle&& other): _kind(std::move(other._kind)) {}
       // @kind MovementAssigment
       const Obstacle& operator=(const Obstacle&& other) const noexcept {
         this->_kind = std::move(other._kind);
-        this->_position = other._position;
         return *this;
       }
 
-      const std::pair<Obstacle, uint8_t> update(
-        uint32_t time,
-        uint32_t player_position,
-        const PlayerState &player_state
-      ) const && noexcept {
-        auto [next_kind, updated] = std::visit(UpdateVisitor{time, player_position, player_state}, _kind);
+      const std::tuple<Obstacle, Interaction, std::vector<Renderable>> update(uint32_t time, const PlayerState &player_state) const && noexcept {
+        auto [next_kind, updated] = std::visit(UpdateVisitor{time, player_state}, _kind);
         _kind = std::move(next_kind);
-        return std::make_pair(std::move(*this), 0);
+        auto outputs = this->renderable();
+        return std::make_tuple(std::move(*this), Interaction::NONE, outputs);
       }
 
-      const std::optional<Renderable> renderable(void) const {
-        auto color = std::visit(RenderableVisitor{}, _kind);
-        if (color == std::nullopt) {
-          return std::nullopt;
-        }
-        return std::make_pair(_position, *color);
+      const std::vector<Renderable> renderable(void) const {
+        std::vector<Renderable> out;
+        return out;
       }
-
-    private:
-      struct Enemy final {
-      };
-
-      struct Slower final {
-      };
-
-      struct Dead final {
-      };
 
       // A visitor that will return the color for each kind of obstacle.
       struct RenderableVisitor final {
-        std::optional<std::array<uint8_t, 3>> operator()(const Enemy& en) {
-          return std::nullopt;
+        std::vector<Renderable> operator()(const Enemy& en) {
+          std::vector<Renderable> out;
+          out.push_back(std::make_pair(en._position, (std::array<uint8_t, 3>) { 255, 0, 0 }));
+          return out;
         }
 
-        std::optional<std::array<uint8_t, 3>> operator()(const Slower& slow) {
-          return std::nullopt;
-        }
-
-        std::optional<std::array<uint8_t, 3>> operator()(const Dead& dead) {
-          return std::nullopt;
+        std::vector<Renderable> operator()(const Dead& dead) {
+          std::vector<Renderable> out;
+          return out;
         }
       };
 
       struct UpdateVisitor final {
-        UpdateVisitor(uint32_t time, uint32_t player_position, const PlayerState& player_state) {}
-        const std::pair<std::variant<Enemy, Slower, Dead>, bool> operator()(const Enemy& en) const && {
+        UpdateVisitor(uint32_t time, const PlayerState& player_state): _time(time), _player_state(player_state) {}
+
+        const std::pair<ObstacleKinds, bool> operator()(const Enemy& en) const && {
+          auto [updated_timer, is_done] = std::move(en._movement_timer).tick(_time);
+          en._movement_timer = is_done ? Timer(1000) : std::move(updated_timer);
+
+          if (!is_done) {
+            return std::make_pair(std::move(en), false);
+          }
+
+          bool cranked_left = en._position + 10 > en._origin;
+          bool cranked_right = en._position < en._origin - 10;
+
+          if (cranked_left || cranked_right) {
+            en._direction = cranked_left ? Direction::RIGHT : Direction::LEFT;
+          }
+
+          en._position = en._direction == Direction::LEFT
+            ? en._position + 1
+            : en._position - 1;
+
+
           return std::make_pair(std::move(en), false);
         }
-        const std::pair<std::variant<Enemy, Slower, Dead>, bool> operator()(const Slower& en) const && {
+
+        const std::pair<ObstacleKinds, bool> operator()(const Dead& en) const && {
           return std::make_pair(std::move(en), false);
         }
-        const std::pair<std::variant<Enemy, Slower, Dead>, bool> operator()(const Dead& en) const && {
-          return std::make_pair(std::move(en), false);
-        }
+
+        uint32_t _time;
+        const PlayerState& _player_state;
       };
 
-      mutable std::variant<Enemy, Slower, Dead> _kind;
-      mutable uint32_t _position;
+      mutable ObstacleKinds _kind;
   };
 }
