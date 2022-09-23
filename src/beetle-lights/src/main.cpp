@@ -22,12 +22,12 @@ constexpr const uint32_t busy_pin = 2;
 struct MessagePayload {
   char content[120];
 };
-MessagePayload frame_payload;
-bool setup_complete = false;
-Adafruit_NeoPixel pixels(num_pixels, pixel_pin);
-std::pair<uint32_t, uint32_t> last_input = std::make_pair(0, 0);
+static MessagePayload frame_payload;
+static bool setup_complete = false;
+static Adafruit_NeoPixel pixels(num_pixels, pixel_pin);
+static std::optional<std::pair<uint32_t, uint32_t>> last_input = std::nullopt;
 
-Engine engine;
+static const beetle_lights::Level current_level;
 
 std::pair<uint32_t, uint32_t> parse_message(const char* data, int max_len) {
   const char * head = data + 0;
@@ -97,17 +97,24 @@ void setup(void) {
 }
 
 void loop(void) {
-  auto next = engine.update(last_input, millis());
+  auto level_update = std::move(current_level).update(last_input, millis());
+  last_input = std::nullopt;
 
-  auto renderables = std::get<1>(next);
-
-  for (auto start = renderables.cbegin(); start != renderables.cend(); start++) {
-    auto led_index = std::get<0>(*start);
-    auto colors = std::get<1>(*start);
-    pixels.setPixelColor(led_index, Adafruit_NeoPixel::Color(colors[0], colors[1], colors[2]));
-  }
-
-  engine = std::move(std::get<0>(next));
+  auto renderables = std::get<1>(level_update);
   pixels.fill(Adafruit_NeoPixel::Color(0, 0, 0));
+
+  if (renderables.size() > 0) {
+    for (auto start = renderables.cbegin(); start != renderables.cend(); start++) {
+      auto led_index = std::get<0>(*start);
+      auto colors = std::get<1>(*start);
+      pixels.setPixelColor(led_index, Adafruit_NeoPixel::Color(colors[0], colors[1], colors[2]));
+    }
+  }
   pixels.show();
+
+  current_level = std::move(std::get<0>(level_update));
+  if (current_level.is_complete()) {
+    log_d("new level");
+    current_level = beetle_lights::Level();
+  }
 }
