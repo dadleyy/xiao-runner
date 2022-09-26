@@ -1,9 +1,15 @@
 #pragma once
 
+#include "esp32-hal-log.h"
+
 namespace beetle_lights {
   struct Timer final {
     public:
-      explicit Timer(uint32_t amount): _interval(amount), _remaining(amount) {}
+      explicit Timer(uint32_t amount):
+        _interval(amount),
+        _remaining(amount),
+        _last_time(0)
+        {}
       ~Timer() = default;
 
       Timer(Timer&) = delete;
@@ -26,10 +32,17 @@ namespace beetle_lights {
       }
 
       const std::pair<Timer, bool> tick(uint32_t time) const && noexcept {
-        if (_last_time == 0 || time < _last_time || _remaining == 0) {
+        if (time < _last_time) {
+          log_e("[warning] - provided a time that is in the past (given %d, last %d)", time, _last_time);
+
+          return std::make_pair(std::move(*this), false);
+        }
+
+        if (_last_time == 0) {
           // If this is the first time we've ticked this timer, update the start.
-          _last_time = _last_time == 0 ? time : _last_time;
-          return std::make_pair(std::move(*this), _remaining == 0);
+          _last_time = time;
+
+          return std::make_pair(std::move(*this), false);
         }
 
         // Calculate how much time has passed.
@@ -38,7 +51,12 @@ namespace beetle_lights {
         // Update our remaining time.
         _remaining = diff > _remaining ? 0 : _remaining - diff;
         _last_time = time;
+
         return std::make_pair(std::move(*this), _remaining == 0);
+      }
+
+      const bool is_done(void) const {
+        return _remaining == 0;
       }
 
     private:

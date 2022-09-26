@@ -2,16 +2,17 @@
 
 #include <optional>
 #include <variant>
+#include "esp32-hal-log.h"
 #include "timer.hpp"
 #include "renderable.hpp"
 
 namespace beetle_lights {
-  const static uint32_t PLAYER_ATTACK_DURATION = 3000;
-  const static uint32_t PLAYER_DEBUFF_DURATION = 3000;
+  const static uint32_t PLAYER_ATTACK_DURATION = 1000;
+  const static uint32_t PLAYER_DEBUFF_DURATION = 2000;
 
   // The player movement speed is represented here as the amount of milliseconds it takes the
   // player to move a single tile.
-  const static uint32_t PLAYER_MOVEMENT_SPEED = 33;
+  const static uint32_t PLAYER_MOVEMENT_SPEED = 10;
 
   class PlayerState final {
     public:
@@ -44,7 +45,7 @@ namespace beetle_lights {
         {}
 
       const std::pair<PlayerState, Renderable> update(
-        std::optional<std::pair<uint32_t, uint32_t>> &input,
+        const std::optional<std::tuple<uint32_t, uint32_t, uint8_t>> &input,
         uint32_t time
       ) const && noexcept {
         if (_kind == PlayerStateKind::DEAD) {
@@ -59,18 +60,27 @@ namespace beetle_lights {
         auto [next_player_movement_timer, did_move] = std::move(_movement_timer).tick(time);
         _movement_timer = did_move ? Timer(PLAYER_MOVEMENT_SPEED) : std::move(next_player_movement_timer);
 
+        // If we were recovering but now we're idle, update our state.
+        if (_kind == PlayerStateKind::RECOVERING && has_idled) {
+          _kind = PlayerStateKind::IDLE;
+        }
+
+
         // If we have an input message and it is above our threshold and we aren't already attacking,
         // update our state and kick off our action frames.
-        if (input != std::nullopt && std::get<1>(*input) > 2000 && _kind == PlayerStateKind::IDLE && has_idled) {
+        if (input != std::nullopt && std::get<2>(*input) > 0 && _kind == PlayerStateKind::IDLE) {
+          log_d("starting attack (duration %d) at time %d", PLAYER_ATTACK_DURATION, time);
           _kind = PlayerStateKind::ATTACKING;
           _attack_timer = Timer(PLAYER_ATTACK_DURATION);
         }
 
         // Update our position
-        if (_direction == PlayerMovementKinds::FORWARD) {
-          _position = _position >= 100 ? _position : _position + 1;
-        } else if (_direction == PlayerMovementKinds::BACK) {
-          _position = _position > 0 ? _position - 1 : _position;
+        if (did_move) {
+          if (_direction == PlayerMovementKinds::FORWARD) {
+            _position = _position + 1;
+          } else if (_direction == PlayerMovementKinds::BACK) {
+            _position = _position > 0 ? _position - 1 : _position;
+          }
         }
 
         // Update the direction of the player if we had a valid input this update.
@@ -93,10 +103,11 @@ namespace beetle_lights {
           auto [next, is_done] = std::move(_attack_timer).tick(time);
 
           if (is_done) {
-            _kind = PlayerStateKind::IDLE;
+            log_d("done with attack");
+            _kind = PlayerStateKind::RECOVERING;
           }
 
-          _attack_timer = is_done ? std::move(next) : Timer(PLAYER_ATTACK_DURATION);
+          _attack_timer = !is_done ? std::move(next) : Timer(PLAYER_ATTACK_DURATION);
         }
 
         return std::make_pair(std::move(*this), std::make_pair(_position, this->color()));
@@ -111,11 +122,16 @@ namespace beetle_lights {
       }
 
       const std::array<uint8_t, 3> color(void) const {
-        if (is_attacking()) {
-          return { 0, 255, 0 };
+        switch (this->_kind) {
+          case PlayerStateKind::ATTACKING:
+            return { 0, 255, 0 };
+          case PlayerStateKind::RECOVERING:
+            return { 180, 80, 100 };
+          case PlayerStateKind::IDLE:
+            return { 255, 255, 255 };
+          default:
+            return { 0, 0, 0 };
         }
-
-        return { 255, 255, 255 };
       }
 
     private:
@@ -123,8 +139,8 @@ namespace beetle_lights {
         IDLE,
         ATTACKING,
         DEAD,
+        RECOVERING,
       };
-
 
       enum PlayerMovementKinds {
         NONE,

@@ -11,7 +11,12 @@
 // Pin definitions based on current hardware: Firebeetle ESP32 2
 //
 
-constexpr const uint8_t broadcast_address[] = {0x58, 0xBF, 0x25, 0xA0, 0x72, 0x24};
+// old device:
+// constexpr const uint8_t broadcast_address[] = {0x58, 0xBF, 0x25, 0xA0, 0x72, 0x24};
+
+// esp32c3:
+constexpr const uint8_t broadcast_address[] = {0xA0, 0x76, 0x4E, 0x44, 0xFA, 0x8C};
+
 esp_now_peer_info_t peer_info;
 
 typedef struct message_payload {
@@ -21,8 +26,9 @@ typedef struct message_payload {
 bool setup_complete = false;
 message_payload_t message_payload;
 
+uint16_t ticker = 0;
+
 void sent_cb(const uint8_t* mac_addr, esp_now_send_status_t status) {
-  log_d("sent callback");
 }
 
 void setup(void) {
@@ -62,10 +68,20 @@ void loop(void) {
     return;
   }
 
+  ticker += 1;
+
   int32_t x_position = analogRead(A3);
   int32_t y_position = analogRead(A2);
+  int32_t z_position = analogRead(A1);
+  uint8_t normalized_z = 0;
+
+  if (z_position != 0) {
+    log_d("z-position: %d");
+    normalized_z = 1;
+  }
+
   memset(message_payload.content, '\0', 40);
-  sprintf(message_payload.content, "[%d|%d]", x_position, y_position);
+  sprintf(message_payload.content, "[%d|%d|%d]", x_position, y_position, normalized_z);
 
   esp_err_t result = esp_now_send(broadcast_address, (uint8_t *) &message_payload, sizeof(message_payload));
 
