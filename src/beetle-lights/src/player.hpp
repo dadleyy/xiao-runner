@@ -64,7 +64,7 @@ namespace beetle_lights {
       const std::pair<PlayerState, Message> update(
         const std::optional<std::tuple<uint32_t, uint32_t, uint8_t>> &input,
         uint32_t time
-      ) const && noexcept {
+      ) const noexcept {
         _light_buffer->fill(std::nullopt);
 
         if (_kind == PlayerStateKind::DEAD) {
@@ -159,7 +159,7 @@ namespace beetle_lights {
         return _light_buffer->cend();
       }
 
-      const PlayerState apply(const Message &message) const && noexcept {
+      const PlayerState apply(const Message &message) const noexcept {
         if (std::holds_alternative<ObstacleCollision>(message)) {
           log_d("player is dead");
           _kind = PlayerStateKind::DEAD;

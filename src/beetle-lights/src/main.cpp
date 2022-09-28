@@ -115,9 +115,7 @@ void setup(void) {
     level_size ++;
     level++;
   }
-
   log_d("first level: '%.*s'", level_size, head);
-
   current_level = beetle_lights::Level(head, level_size);
 
   WiFi.mode(WIFI_MODE_STA);

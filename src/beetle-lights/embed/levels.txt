@@ -1,3 +1,4 @@
 1                                                                                                  100 
-p          x                                                                                       g
-p          x         x                                                                             g
+p                                 x                                                                g
+p                                 x                                     x                          g
+p               x                                     x                               x            g
