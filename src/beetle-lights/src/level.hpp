@@ -17,22 +17,28 @@ namespace beetle_lights {
 
   class Level final {
       public:
-        Level(): _player_state(PlayerState()), _obstacles(new ObstacleBuffer()), _lights(new LightBuffer()) {
-          log_d("allocating new memory for a level");
-        };
-        explicit Level(const char * layout):
+        Level():
           _player_state(PlayerState()),
           _obstacles(new ObstacleBuffer()),
-          _lights(new LightBuffer()) {
+          _lights(new LightBuffer()),
+          _completion_timer(100) {
+          log_d("allocating new memory for a level");
+        }
+
+        explicit Level(const char * layout, uint32_t size):
+          _player_state(PlayerState()),
+          _obstacles(new ObstacleBuffer()),
+          _lights(new LightBuffer()),
+          _completion_timer(100) {
           const char * cursor = layout;
           uint32_t position = 0, obstacle_index = 0;
 
-          while (*cursor != '\n') {
+          while (*cursor != '\n' && position < size) {
             position += 1;
 
-            if (*cursor == 'x') {
+            if (*cursor != ' ') {
               log_d("found enemy at position %d (enemy #%d)", position, obstacle_index);
-              (*_obstacles)[obstacle_index] = Obstacle(position);
+              (*_obstacles)[obstacle_index] = Obstacle(*cursor, position);
               obstacle_index ++;
             }
 
@@ -49,7 +55,8 @@ namespace beetle_lights {
         Level(const Level&& other):
           _player_state(std::move(other._player_state)),
           _obstacles(std::move(other._obstacles)),
-          _lights(std::move(other._lights))
+          _lights(std::move(other._lights)),
+          _completion_timer(std::move(other._completion_timer))
           { }
 
         // @kind MovementAssigment
@@ -57,11 +64,12 @@ namespace beetle_lights {
           this->_player_state = std::move(other._player_state);
           this->_obstacles = std::move(other._obstacles);
           this->_lights = std::move(other._lights);
+          this->_completion_timer = std::move(other._completion_timer);
           return *this;
         }
 
-        bool is_complete(void) const noexcept {
-          return _player_state.is_dead();
+        const bool is_complete(void) const {
+          return _completion_timer == 0;
         }
 
         // ...
@@ -69,29 +77,50 @@ namespace beetle_lights {
           const std::optional<std::tuple<uint32_t, uint32_t, uint8_t>> &input,
           uint32_t time
         ) const && noexcept {
+          _lights->fill(std::nullopt);
+
+          if (_completion_timer < 100) {
+            _completion_timer -= 1;
+            return std::move(*this);
+          }
+
           // Update the state of the player.
-          auto [new_player_state, player_light] = std::move(_player_state).update(input, time);
+          auto [new_player_state, player_update] = std::move(_player_state).update(input, time);
           _player_state = std::move(new_player_state);
 
           // Iterate over our obstacles, updating them based on the player position and new state.
-          uint16_t obstacle_light_index = 1;
+          uint16_t frame_light_index = 0;
 
           for (auto obstacle_index = _obstacles->cbegin(); obstacle_index != _obstacles->cend(); obstacle_index++) {
-            auto [new_state, _] = std::move(*obstacle_index).update(time, _player_state);
+            auto [new_state, new_player_update] = std::move(*obstacle_index).update(time, std::move(player_update));
 
-            for (auto light_index = new_state.cbegin(); light_index != new_state.cend(); light_index++) {
-              if (*light_index == std::nullopt) {
+            for (auto ob_light = new_state.cbegin(); ob_light != new_state.cend(); ob_light++) {
+              if (*ob_light == std::nullopt) {
                 continue;
               }
 
-              obstacle_light_index += 1;
-              (*_lights)[obstacle_light_index] = light_index->value();
+              (*_lights)[frame_light_index] = ob_light->value();
+              frame_light_index += 1;
             }
 
             *obstacle_index = std::move(new_state);
+            player_update = std::move(new_player_update);
           }
 
-          (*_lights)[0] = player_light;
+          _player_state = std::move(_player_state).apply(player_update);
+
+          for (auto pl = _player_state.light_begin(); pl != _player_state.light_end(); pl++) {
+            if (*pl == std::nullopt) {
+              continue;
+            }
+            (*_lights)[frame_light_index] = pl->value();
+            frame_light_index += 1;
+          }
+
+          if (_completion_timer < 100 || _player_state.is_dead() || std::holds_alternative<GoalReached>(player_update)) {
+            _completion_timer -= 1;
+          }
+
           return std::move(*this);
         }
 
@@ -107,6 +136,7 @@ namespace beetle_lights {
         const PlayerState _player_state;
         mutable std::unique_ptr<ObstacleBuffer> _obstacles;
         mutable std::unique_ptr<LightBuffer> _lights;
+        mutable uint8_t _completion_timer;
   };
 
 }

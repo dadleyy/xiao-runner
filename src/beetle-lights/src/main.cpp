@@ -30,7 +30,11 @@ static Adafruit_NeoPixel pixels(num_pixels, pixel_pin);
 static std::optional<std::tuple<uint32_t, uint32_t, uint8_t>> last_input = std::nullopt;
 
 static const beetle_lights::Level current_level;
+static uint16_t current_level_index = 0;
 static const beetle_lights::Timer debug_timer(debug_timer_time_ms);
+
+extern const char level_data_start[] asm("_binary_embed_levels_txt_start");
+extern const char level_data_end[] asm("_binary_embed_levels_txt_end");
 
 std::tuple<uint32_t, uint32_t, uint8_t> parse_message(const char* data, int max_len) {
   const char * head = data + 0;
@@ -82,7 +86,6 @@ void setup(void) {
   Serial.begin(115200);
 
   pinMode(pixel_pin, OUTPUT);
-  // pinMode(busy_pin, OUTPUT);
 
   pixels.begin();
   pixels.setBrightness(20);
@@ -99,7 +102,21 @@ void setup(void) {
     delay(200);
   }
 
-  current_level = beetle_lights::Level("            x");
+  // Skip our first line, then get the memory addr of the start of our first level.
+  const char * head = level_data_start;
+  while (*head != '\n') {
+    head++;
+  }
+  uint8_t level_size = 0;
+  const char *level = (++head);
+  while (*level != '\n') {
+    level_size ++;
+    level++;
+  }
+
+  log_d("first level: '%.*s'", level_size, head);
+
+  current_level = beetle_lights::Level(head, level_size);
 
   WiFi.mode(WIFI_MODE_STA);
   log_d("setup complete");
@@ -120,7 +137,8 @@ void loop(void) {
   debug_timer = std::move(next_timer);
 
   if (is_done) {
-    log_d("free memory before update: %d (max %d)", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+    auto stack_size = uxTaskGetStackHighWaterMark(NULL);
+    log_d("memory: %d (max %d) (stack %d)", ESP.getFreeHeap(), ESP.getMaxAllocHeap(), stack_size);
     debug_timer = beetle_lights::Timer(debug_timer_time_ms);
   }
 
@@ -141,7 +159,30 @@ void loop(void) {
   pixels.show();
 
   if (current_level.is_complete()) {
-    log_d("new level");
-    current_level = beetle_lights::Level();
+    current_level_index = current_level_index == 0 ? 1 : 0;
+
+    uint8_t level_index = 0;
+    const char * head = level_data_start;
+
+    while (level_index < current_level_index + 1) {
+      while (*head != '\n') {
+        head++;
+      }
+      log_d("skipping level %d", level_index);
+      level_index = level_index + 1;
+
+      if (head != level_data_end) {
+        head++;
+      }
+    }
+
+    uint8_t level_size = 0;
+    const char *level = (++head);
+    while (*level != '\n') {
+      level_size ++;
+      level++;
+    }
+    log_d("level %d: '%.*s'", current_level_index, level_size, head);
+    current_level = beetle_lights::Level(head, level_size);
   }
 }

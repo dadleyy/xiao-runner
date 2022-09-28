@@ -8,33 +8,29 @@
 // This is the code for the controller that users will hold in their
 // hands.
 //
-// Pin definitions based on current hardware: Firebeetle ESP32 2
+// Pin definitions based on current hardware: Seeed Studio XIAO ESP32C3
 //
-
-// old device:
-// constexpr const uint8_t broadcast_address[] = {0x58, 0xBF, 0x25, 0xA0, 0x72, 0x24};
-
-// esp32c3:
-constexpr const uint8_t broadcast_address[] = {0xA0, 0x76, 0x4E, 0x44, 0xFA, 0x8C};
-
-esp_now_peer_info_t peer_info;
-
 typedef struct message_payload {
   char content[120];
 } message_payload_t;
 
-bool setup_complete = false;
+// MAC address of beetle-lights.
+constexpr const uint8_t broadcast_address[] = {0xA0, 0x76, 0x4E, 0x44, 0xFA, 0x8C};
+
+esp_now_peer_info_t peer_info;
 message_payload_t message_payload;
+bool setup_complete = false;
+uint32_t last_debug_log = 0;
 
-uint16_t ticker = 0;
-
-void sent_cb(const uint8_t* mac_addr, esp_now_send_status_t status) {
-}
+// TODO: is this empty callback necessary?
+void sent_cb(const uint8_t* mac_addr, esp_now_send_status_t status) {}
 
 void setup(void) {
   Serial.begin(115200);
 
   delay(1000);
+
+  pinMode(A2, INPUT_PULLUP);
 
   WiFi.mode(WIFI_MODE_STA);
   Serial.println(WiFi.macAddress());
@@ -58,25 +54,24 @@ void setup(void) {
   }
 
   setup_complete = true;
+  last_debug_log = millis();
   log_d("setup complete");
 }
 
 void loop(void) {
+  auto now = millis();
   delay(10);
 
   if (setup_complete == false) {
     return;
   }
 
-  ticker += 1;
-
-  int32_t x_position = analogRead(A3);
-  int32_t y_position = analogRead(A2);
-  int32_t z_position = analogRead(A1);
+  int32_t x_position = analogRead(A0);
+  int32_t y_position = analogRead(A1);
+  int32_t z_position = digitalRead(A2);
   uint8_t normalized_z = 0;
 
   if (z_position != 0) {
-    log_d("z-position: %d");
     normalized_z = 1;
   }
 
@@ -85,7 +80,8 @@ void loop(void) {
 
   esp_err_t result = esp_now_send(broadcast_address, (uint8_t *) &message_payload, sizeof(message_payload));
 
-  if (result != ESP_OK) {
-    log_e("frame (%d, %d) '%s' success", x_position, y_position, message_payload.content);
+  if (now - last_debug_log > 1000) {
+    log_e("frame (%d, %d, %d) '%s' success", x_position, y_position, z_position, message_payload.content);
+    last_debug_log = now;
   }
 }
