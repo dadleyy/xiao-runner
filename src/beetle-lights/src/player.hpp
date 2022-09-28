@@ -151,11 +151,11 @@ namespace beetle_lights {
         );
       }
 
-      const PlayerLightBuffer::const_iterator light_begin() const {
+      const PlayerLightBuffer::const_iterator first_light() const {
         return _light_buffer->cbegin();
       }
 
-      const PlayerLightBuffer::const_iterator light_end() const {
+      const PlayerLightBuffer::const_iterator last_light() const {
         return _light_buffer->cend();
       }
 

@@ -200,11 +200,11 @@ namespace beetle_lights {
         return *this;
       }
 
-      ObstacleLightBuffer::const_iterator cbegin(void) {
+      ObstacleLightBuffer::const_iterator first_light(void) {
         return _lights.cbegin();
       }
 
-      ObstacleLightBuffer::const_iterator cend(void) {
+      ObstacleLightBuffer::const_iterator last_light(void) {
         return _lights.cend();
       }
 

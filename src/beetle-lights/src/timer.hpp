@@ -31,7 +31,7 @@ namespace beetle_lights {
         return *this;
       }
 
-      const std::pair<Timer, bool> tick(uint32_t time) const && noexcept {
+      const std::pair<Timer, bool> tick(uint32_t time) const noexcept {
         if (time < _last_time) {
           log_e("[warning] - provided a time that is in the past (given %d, last %d)", time, _last_time);
 

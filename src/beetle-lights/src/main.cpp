@@ -102,7 +102,9 @@ void setup(void) {
     delay(200);
   }
 
-  // Skip our first line, then get the memory addr of the start of our first level.
+  // TODO(level_parsing): what we'd like to do here is get a pointer to the location within our
+  // `levels.txt` file for a specific level, including the amount of characters in that level
+  // definition. We're duplicating this logic below.
   const char * head = level_data_start;
   while (*head != '\n') {
     head++;
@@ -147,7 +149,7 @@ void loop(void) {
 
   pixels.fill(Adafruit_NeoPixel::Color(0, 0, 0));
 
-  for (auto start = current_level.cbegin(); start != current_level.cend(); start++) {
+  for (auto start = current_level.first_light(); start != current_level.last_light(); start++) {
     if (*start == std::nullopt) {
       continue;
     }
@@ -158,12 +160,11 @@ void loop(void) {
 
   pixels.show();
 
+  // TODO(level_parsing)
   if (current_level.is_complete()) {
     current_level_index = current_level_index == 0 ? 1 : 0;
-
     uint8_t level_index = 0;
     const char * head = level_data_start;
-
     while (level_index < current_level_index + 1) {
       while (*head != '\n') {
         head++;
@@ -175,7 +176,6 @@ void loop(void) {
         head++;
       }
     }
-
     uint8_t level_size = 0;
     const char *level = (++head);
     while (*level != '\n') {
