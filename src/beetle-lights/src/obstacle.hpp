@@ -125,6 +125,8 @@ namespace beetle_lights {
           _lights[_light_index] = std::make_pair(en._position, (std::array<uint8_t, 3>) { 255, 0, 0 });
           _light_index += 1;
 
+          auto original_position = en._position;
+
           if (has_moved) {
             en._position = en._direction == Direction::LEFT
               ? en._position + 1
@@ -137,13 +139,15 @@ namespace beetle_lights {
             }
           }
 
+          // Do not bother attempting to process non-move related messages
           if (std::holds_alternative<PlayerMovement>(_message) != true) {
             return std::make_pair(std::move(en), std::move(_message));
           }
 
           auto player_movement = std::get_if<PlayerMovement>(&_message);
 
-          if (player_movement->position != en._position) {
+          // If we aren't touching this obstacle, ignore.
+          if (player_movement->position != original_position) {
             return std::make_pair(std::move(en), std::move(_message));
           }
 
@@ -156,6 +160,7 @@ namespace beetle_lights {
             );
           }
 
+          // At this point there was a hit and the player wasn't attacking. we are dead.
           return std::make_pair(Corpse(), std::move(_message));
         }
 

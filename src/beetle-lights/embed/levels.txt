@@ -1,4 +1,4 @@
-1                                                                                                  100 
-p                                 x                                                                g
-p                                 x                                     x                          g
-p               x                                     x                               x            g
+1                                                                                                  100                 120                 140
+p                                 x                                                                                                           g
+p                                 x                                     x                                                                     g
+p               x                                     x                               x                                                       g

@@ -13,8 +13,21 @@
 #include "player.hpp"
 
 namespace beetle_lights {
+  // TODO(static-light-amount): The level's light buffer here should be able to contain the
+  // total amount of LEDs that we have available on our strip. This might also be better as
+  // a vector, but the embedded memory constraints (i.e avoiding memory fragmentation) are
+  // still being learned.
   using LightBuffer = std::array<std::optional<Renderable>, 100>;
+
+  // TODO(obstacle-count): we're saying here that the most amount of obstacles a level can
+  // have - including "corpses" - is 10.
   using ObstacleBuffer = std::array<const Obstacle, 10>;
+
+  enum LevelResultKinds {
+    PENDING,
+    SUCCESS,
+    FAILURE,
+  };
 
   class Level final {
       public:
@@ -23,7 +36,7 @@ namespace beetle_lights {
           _obstacles(new ObstacleBuffer()),
           _lights(new LightBuffer()),
           _completion_timer(new Animation()),
-          _result(0) {
+          _result(LevelResultKinds::PENDING) {
           log_d("allocating new memory for a level");
         }
 
@@ -32,7 +45,7 @@ namespace beetle_lights {
           _obstacles(new ObstacleBuffer()),
           _lights(new LightBuffer()),
           _completion_timer(new Animation()),
-          _result(0) {
+          _result(LevelResultKinds::PENDING) {
           const char * cursor = layout;
           uint32_t position = 0, obstacle_index = 0;
 
@@ -73,8 +86,8 @@ namespace beetle_lights {
           return *this;
         }
 
-        const bool is_complete(void) const {
-          return _completion_timer->is_done();
+        const LevelResultKinds result(void) const {
+          return _completion_timer->is_done() ? _result : LevelResultKinds::PENDING;
         }
 
         // ...
@@ -84,7 +97,7 @@ namespace beetle_lights {
         ) const && noexcept {
           _lights->fill(std::nullopt);
 
-          if (_result != 0) {
+          if (_result != LevelResultKinds::PENDING) {
             _completion_timer = std::make_unique<Animation>(std::move(_completion_timer)->tick(time));
 
             uint8_t i = 0;
@@ -139,7 +152,7 @@ namespace beetle_lights {
           bool is_dead = _player_state.is_dead();
           if (is_dead || std::holds_alternative<GoalReached>(player_update)) {
             _completion_timer = std::make_unique<Animation>(!is_dead);
-            _result = is_dead ? 1 : 2;
+            _result = is_dead ? LevelResultKinds::FAILURE : LevelResultKinds::SUCCESS;
           }
 
           return std::move(*this);
@@ -158,7 +171,7 @@ namespace beetle_lights {
         mutable std::unique_ptr<ObstacleBuffer> _obstacles;
         mutable std::unique_ptr<LightBuffer> _lights;
         mutable std::unique_ptr<Animation> _completion_timer;
-        mutable uint8_t _result;
+        mutable LevelResultKinds _result;
   };
 
 }

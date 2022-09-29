@@ -11,31 +11,38 @@
 //
 // This is the "server" side of the architecture.
 //
-// Pin definitions based on current hardware: Teyleten ESP32
-// https://www.amazon.com/gp/product/B08246MCL5
-//
+// Pin definitions based on current hardware: Seeed studio XIAO ESP32C3
+// https://www.seeedstudio.com/Seeed-XIAO-ESP32C3-p-5431.html
 
+#ifndef NUM_PIXELS
 constexpr const uint32_t num_pixels = 280;
+#else
+constexpr const uint32_t num_pixels = NUM_PIXELS;
+#endif
+
 constexpr const uint32_t pixel_pin = D0;
-// constexpr const uint32_t busy_pin = 2;
 constexpr const uint32_t debug_timer_time_ms = 500;
 
-// globals.
 struct MessagePayload {
   char content[120];
 };
 static MessagePayload frame_payload;
-static bool setup_complete = false;
 static Adafruit_NeoPixel pixels(num_pixels, pixel_pin);
-static std::optional<std::tuple<uint32_t, uint32_t, uint8_t>> last_input = std::nullopt;
 
-static const beetle_lights::Level current_level;
-static uint16_t current_level_index = 0;
-static const beetle_lights::Timer debug_timer(debug_timer_time_ms);
-
+// Level data stored in flash via `emebed_txtfiles`
 extern const char level_data_start[] asm("_binary_embed_levels_txt_start");
 extern const char level_data_end[] asm("_binary_embed_levels_txt_end");
 
+static const beetle_lights::Level current_level;
+static std::optional<std::tuple<uint32_t, uint32_t, uint8_t>> last_input = std::nullopt;
+static const beetle_lights::Timer debug_timer(debug_timer_time_ms);
+
+static bool setup_complete = false;
+static uint16_t current_level_index = 0;
+static uint16_t total_level_count = 0;
+
+// The messages sent from the `beetle-controller` are received and parsed into a tuple containing
+// three unsigned integer values - x, y and z (button press).
 std::tuple<uint32_t, uint32_t, uint8_t> parse_message(const char* data, int max_len) {
   const char * head = data + 0;
   uint32_t left = 0;
@@ -76,6 +83,7 @@ std::tuple<uint32_t, uint32_t, uint8_t> parse_message(const char* data, int max_
   return std::make_tuple(left, right, up);
 }
 
+// Data callback fro esp-now.
 void receive_cb(const uint8_t * mac, const uint8_t *incoming_data, int len) {
   memset(frame_payload.content, '\0', 120);
   memcpy(&frame_payload, incoming_data, sizeof(frame_payload));
@@ -115,8 +123,18 @@ void setup(void) {
     level_size ++;
     level++;
   }
+  total_level_count = 1;
   log_d("first level: '%.*s'", level_size, head);
   current_level = beetle_lights::Level(head, level_size);
+
+  // While we're here, let us also parse the total amount of available levels.
+  while (level != level_data_end) {
+    level++;
+    if (*level == '\n') {
+      total_level_count += 1;
+    }
+  }
+  log_d("found %d levels", total_level_count);
 
   WiFi.mode(WIFI_MODE_STA);
   log_d("setup complete");
@@ -129,9 +147,16 @@ void setup(void) {
   }
 
   esp_now_register_recv_cb(receive_cb);
+  setup_complete = total_level_count > 0;
 }
 
 void loop(void) {
+  if (setup_complete == false) {
+    delay(1000);
+    log_e("[warning] boot did not complete successfully, skipping");
+    return;
+  }
+
   auto now = millis();
   auto [next_timer, is_done] = std::move(debug_timer).tick(now);
   debug_timer = std::move(next_timer);
@@ -158,11 +183,21 @@ void loop(void) {
 
   pixels.show();
 
+  auto result = current_level.result();
   // TODO(level_parsing)
-  if (current_level.is_complete()) {
-    current_level_index = current_level_index == 0 ? 1 : 0;
+  if (result != beetle_lights::LevelResultKinds::PENDING) {
+    current_level_index = result == beetle_lights::LevelResultKinds::SUCCESS
+      ? current_level_index + 1
+      : 0;
+
+    if (current_level_index >= total_level_count) {
+      current_level_index = 0;
+    }
+
     uint8_t level_index = 0;
     const char * head = level_data_start;
+    // Note: we're adding 1 to the current level index during this iteration to account
+    // for the first line of our level data being the guide line.
     while (level_index < current_level_index + 1) {
       while (*head != '\n') {
         head++;
