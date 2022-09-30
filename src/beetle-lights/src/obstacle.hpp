@@ -198,6 +198,7 @@ namespace beetle_lights {
         _kind(std::move(other._kind)),
         _lights(std::move(other._lights))
         {}
+
       // @kind MovementAssigment
       const Obstacle& operator=(const Obstacle&& other) const noexcept {
         this->_kind = std::move(other._kind);

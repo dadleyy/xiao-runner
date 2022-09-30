@@ -2,6 +2,10 @@
 #include "WiFi.h"
 #include "esp_now.h"
 
+#define X_AXIS_PIN A0
+#define Y_AXIS_PIN A1
+#define Z_BUTTON_PIN A2
+
 //
 // Beetle Controller
 //
@@ -30,7 +34,8 @@ void setup(void) {
 
   delay(1000);
 
-  pinMode(A2, INPUT_PULLUP);
+  pinMode(Z_BUTTON_PIN, INPUT_PULLUP);
+  digitalWrite(Z_BUTTON_PIN, HIGH);
 
   WiFi.mode(WIFI_MODE_STA);
   Serial.println(WiFi.macAddress());
@@ -66,12 +71,17 @@ void loop(void) {
     return;
   }
 
-  int32_t x_position = analogRead(A0);
-  int32_t y_position = analogRead(A1);
-  int32_t z_position = digitalRead(A2);
-  uint8_t normalized_z = 0;
+  int32_t x_position = analogRead(X_AXIS_PIN);
+  int32_t y_position = analogRead(Y_AXIS_PIN);
 
-  if (z_position != 0) {
+  // TODO(hardware-understanding) The push button switch appears to be normally closed when tested
+  // by a voltmeter (the voltmeter reads "open loop" (0L) until pressed). 
+  //
+  // Assuming that is true, it is not immediately clear why the `digitalRead` would be returning `1`
+  // while unpressed and `0` when pressed; it is likely something is being misunderstood.
+  int32_t z_position = digitalRead(Z_BUTTON_PIN);
+  uint8_t normalized_z = 0;
+  if (z_position == 1) {
     normalized_z = 1;
   }
 
@@ -81,7 +91,7 @@ void loop(void) {
   esp_err_t result = esp_now_send(broadcast_address, (uint8_t *) &message_payload, sizeof(message_payload));
 
   if (now - last_debug_log > 1000) {
-    log_e("frame (%d, %d, %d) '%s' success", x_position, y_position, z_position, message_payload.content);
+    log_e("frame (%d, %d, %d) '%s' result: %d", x_position, y_position, z_position, message_payload.content, result);
     last_debug_log = now;
   }
 }
