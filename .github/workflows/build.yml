@@ -8,7 +8,7 @@ on:
 jobs:
   build-pio:
     runs-on: ubuntu-latest
-    env:
+    defaults:
       run:
         working-directory: src/beetle-controller
     steps:
