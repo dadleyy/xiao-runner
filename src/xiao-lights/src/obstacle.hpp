@@ -17,6 +17,43 @@ namespace beetle_lights {
       class UpdateVisitor;
       static const uint16_t ENEMY_MS_PER_MOVE = 100;
 
+      struct Snake final {
+        public:
+          Snake() = delete;
+          explicit Snake(uint32_t pos):
+            _direction(Direction::LEFT),
+            _position(pos),
+            _origin(pos),
+            _movement_timer(Timer(ENEMY_MS_PER_MOVE))
+            {}
+          ~Snake() = default;
+
+          Snake(const Snake&) = delete;
+          Snake& operator=(const Snake&) = delete;
+
+          Snake(const Snake&& other):
+            _direction(other._direction),
+            _position(other._position),
+            _origin(other._origin),
+            _movement_timer(std::move(other._movement_timer))
+            {}
+
+          const Snake& operator=(const Snake&& other) noexcept {
+            this->_direction = other._direction;
+            this->_position = other._position;
+            this->_origin = other._origin;
+            this->_movement_timer = std::move(other._movement_timer);
+            return *this;
+          }
+
+        private:
+          friend class UpdateVisitor;
+          mutable Direction _direction;
+          mutable uint32_t _position;
+          mutable uint32_t _origin;
+          const Timer _movement_timer;
+      };
+
       struct Enemy final {
         public:
           Enemy() = delete;
@@ -87,7 +124,7 @@ namespace beetle_lights {
         }
       };
 
-      using ObstacleKinds = std::variant<Enemy, Goal, Corpse>;
+      using ObstacleKinds = std::variant<Enemy, Snake, Goal, Corpse>;
      
       struct UpdateVisitor final {
         UpdateVisitor(uint32_t time, ObstacleLightBuffer& lights, Message message):
@@ -116,6 +153,10 @@ namespace beetle_lights {
           }
 
           return std::make_pair(std::move(goal), std::move(_message));
+        }
+
+        const std::pair<ObstacleKinds, Message> operator()(const Snake& en) const && {
+          return std::make_pair(std::move(en), std::move(_message));
         }
 
         const std::pair<ObstacleKinds, Message> operator()(const Enemy& en) const && {
@@ -175,18 +216,28 @@ namespace beetle_lights {
       };
 
     public:
-      Obstacle(): _kind(Corpse()), _lights() {}
-      explicit Obstacle(char symbol, uint32_t pos): _kind(Corpse()), _lights() {
+      static std::optional<std::unique_ptr<Obstacle>> try_from(char symbol, uint32_t pos) {
         switch (symbol) {
+          case 's':
+            log_d("constructing enemy");
+
+            return std::make_unique<Obstacle>(ObstacleKinds { std::in_place_type<Snake>, pos });
           case 'x':
-            _kind = ObstacleKinds { std::in_place_type<Enemy>, pos };
-            break;
+            log_d("constructing enemy");
+
+            return std::make_unique<Obstacle>(ObstacleKinds { std::in_place_type<Enemy>, pos });
           case 'g':
-            _kind = ObstacleKinds { std::in_place_type<Goal>, pos };
-            break;
+            log_d("constructing goal");
+
+            return std::make_unique<Obstacle>(ObstacleKinds { std::in_place_type<Goal>, pos });
         }
-        log_d("constructing obstacle");
+
+        return std::nullopt;
       }
+
+      Obstacle(): _kind(Corpse()), _lights() {}
+      explicit Obstacle(ObstacleKinds kind): _kind(std::move(kind)), _lights() {}
+
       ~Obstacle() = default;
 
       Obstacle(Obstacle&) = delete;
@@ -206,15 +257,15 @@ namespace beetle_lights {
         return *this;
       }
 
-      ObstacleLightBuffer::const_iterator first_light(void) {
+      ObstacleLightBuffer::const_iterator first_light(void) const {
         return _lights.cbegin();
       }
 
-      ObstacleLightBuffer::const_iterator last_light(void) {
+      ObstacleLightBuffer::const_iterator last_light(void) const {
         return _lights.cend();
       }
 
-      const std::tuple<Obstacle, Message> update(
+      const std::tuple<const Obstacle, Message> update(
         uint32_t time,
         Message&& message
       ) const && noexcept {

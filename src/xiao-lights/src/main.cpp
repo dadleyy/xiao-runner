@@ -15,13 +15,13 @@
 // https://www.seeedstudio.com/Seeed-XIAO-ESP32C3-p-5431.html
 
 #ifndef NUM_PIXELS
-constexpr const uint32_t num_pixels = 280;
+constexpr const uint32_t num_pixels = 146;
 #else
 constexpr const uint32_t num_pixels = NUM_PIXELS;
 #endif
 
 constexpr const uint32_t pixel_pin = D0;
-constexpr const uint32_t debug_timer_time_ms = 500;
+constexpr const uint32_t debug_timer_time_ms = 1000;
 
 struct MessagePayload {
   char content[120];
@@ -103,12 +103,14 @@ void setup(void) {
   for (uint8_t i = 0; i < 10; i++) {
     log_d("booting %d", i);
 
-    pixels.setBrightness(20);
-    pixels.fill(i % 2 == 0 ? Adafruit_NeoPixel::Color(0, 0, 0) : Adafruit_NeoPixel::Color(0, 255, 0));
-    pixels.show();
+    // pixels.setBrightness(10);
+    // pixels.fill(i % 2 == 0 ? Adafruit_NeoPixel::Color(0, 0, 0) : Adafruit_NeoPixel::Color(0, 255, 0));
+    // pixels.show();
 
     delay(200);
   }
+
+  pixels.setBrightness(20);
 
   // TODO(level_parsing): what we'd like to do here is get a pointer to the location within our
   // `levels.txt` file for a specific level, including the amount of characters in that level
@@ -125,7 +127,7 @@ void setup(void) {
   }
   total_level_count = 1;
   log_d("first level: '%.*s'", level_size, head);
-  current_level = beetle_lights::Level(head, level_size);
+  current_level = beetle_lights::Level(std::make_pair(head, level_size), num_pixels);
 
   // While we're here, let us also parse the total amount of available levels.
   while (level != level_data_end) {
@@ -216,6 +218,6 @@ void loop(void) {
       level++;
     }
     log_d("level %d: '%.*s'", current_level_index, level_size, head);
-    current_level = beetle_lights::Level(head, level_size);
+    current_level = beetle_lights::Level(std::make_pair(head, level_size), num_pixels);
   }
 }

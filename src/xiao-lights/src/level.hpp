@@ -21,7 +21,7 @@ namespace beetle_lights {
 
   // TODO(obstacle-count): we're saying here that the most amount of obstacles a level can
   // have - including "corpses" - is 10.
-  using ObstacleBuffer = std::array<const Obstacle, 10>;
+  using ObstacleBuffer = std::array<std::optional<Obstacle>, 10>;
 
   enum LevelResultKinds {
     PENDING,
@@ -31,36 +31,39 @@ namespace beetle_lights {
 
   class Level final {
       public:
-        Level():
-          _player_state(PlayerState()),
-          _obstacles(new ObstacleBuffer()),
-          _lights(new LightBuffer()),
-          _completion_timer(new Animation()),
-          _result(LevelResultKinds::PENDING) {
-          log_d("allocating new memory for a level");
-        }
+        Level(): Level(std::make_pair("", 0), 0) {}
 
-        explicit Level(const char * layout, uint32_t size):
+        explicit Level(std::pair<const char *, uint32_t> level_data, uint32_t bound):
+          _boundary(bound),
           _player_state(PlayerState()),
-          _obstacles(new ObstacleBuffer()),
-          _lights(new LightBuffer()),
-          _completion_timer(new Animation()),
+          _obstacles(std::make_unique<ObstacleBuffer>()),
+          _lights(std::make_unique<LightBuffer>()),
+          _completion_timer(std::make_unique<Animation>()),
           _result(LevelResultKinds::PENDING) {
+          auto [layout, size] = level_data;
           const char * cursor = layout;
-          uint32_t position = 0, obstacle_index = 0;
+          uint32_t position = 0, en_count = 0;
 
           while (*cursor != '\n' && position < size) {
-            position += 1;
+            uint32_t mapped_position = position * 2;
 
-            if (*cursor != ' ') {
-              log_d("found enemy at position %d (enemy #%d)", position, obstacle_index);
-              (*_obstacles)[obstacle_index] = Obstacle(*cursor, position);
-              obstacle_index ++;
+            if (mapped_position > _boundary) {
+              log_e("attempting to create level with out-of-bounds obstacle: %d", mapped_position);
             }
 
-            ++cursor;
+            auto attempt = Obstacle::try_from(*cursor, mapped_position);
+
+            if (attempt != std::nullopt) {
+              log_d("found enemy at position %d (enemy #%d)", mapped_position, en_count);
+              (*_obstacles)[en_count].emplace(std::move(*attempt->release()));
+              en_count += 1;
+            }
+
+            position++;
+            cursor++;
           }
         }
+
         ~Level() = default;
 
         Level(Level&) = delete;
@@ -69,6 +72,7 @@ namespace beetle_lights {
         Level& operator=(const Level&) = delete;
 
         Level(const Level&& other):
+          _boundary(other._boundary),
           _player_state(std::move(other._player_state)),
           _obstacles(std::move(other._obstacles)),
           _lights(std::move(other._lights)),
@@ -78,6 +82,7 @@ namespace beetle_lights {
 
         // @kind MovementAssigment
         const Level& operator=(const Level&& other) const noexcept {
+          this->_boundary = other._boundary;
           this->_player_state = std::move(other._player_state);
           this->_obstacles = std::move(other._obstacles);
           this->_lights = std::move(other._lights);
@@ -118,8 +123,12 @@ namespace beetle_lights {
 
           // Iterate over our obstacles, updating them based on the player position and new state.
           uint16_t frame_light_index = 0;
-          for (auto obstacle = _obstacles->cbegin(); obstacle != _obstacles->cend(); obstacle++) {
-            auto [new_state, new_player_update] = std::move(*obstacle)
+          for (auto obstacle = _obstacles->begin(); obstacle != _obstacles->end(); obstacle++) {
+            if (*obstacle == std::nullopt) {
+              continue;
+            }
+
+            auto [new_state, new_player_update] = std::move(obstacle->value())
               .update(time, std::move(player_update));
 
             // With the updated obstacle state, update our own copy of the lights that we will render next frame.
@@ -132,7 +141,7 @@ namespace beetle_lights {
               frame_light_index += 1;
             }
 
-            *obstacle = std::move(new_state);
+            obstacle->emplace(std::move(new_state));
             player_update = std::move(new_player_update);
           }
 
@@ -167,6 +176,7 @@ namespace beetle_lights {
         }
 
       private:
+        mutable uint32_t _boundary;
         const PlayerState _player_state;
         mutable std::unique_ptr<ObstacleBuffer> _obstacles;
         mutable std::unique_ptr<LightBuffer> _lights;
