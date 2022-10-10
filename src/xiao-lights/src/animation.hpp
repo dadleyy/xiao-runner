@@ -1,114 +1,122 @@
 #pragma once
 
-#include <optional>
+#include <variant>
 #include "timer.hpp"
-#include "renderable.hpp"
+#include "direction.hpp"
 
-namespace beetle_lights {
-  using AnimationLightBuffer = std::array<std::optional<Renderable>, 50>;
+class Animation final {
+  public:
+    struct MiddleOut final {
+      uint32_t origin;
+      uint32_t boundary;
+      std::tuple<uint8_t, uint8_t, uint8_t> color;
+    };
 
-  class Animation final {
-    public:
-      explicit Animation(bool good):
-        _stepper(10),
-        _total(3000),
-        _is_done(false),
-        _origin(50),
-        _step(0),
-        _light_buffer(std::make_unique<AnimationLightBuffer>()),
-        _good(good)
-        {}
+    using AnimationConfig = std::variant<MiddleOut>;
 
-      Animation(): Animation(false) {}
+    explicit Animation(AnimationConfig config):
+      _total_timer(new xr::Timer(3000)),
+      _tick_timer(new xr::Timer(30)),
+      _lights(new std::vector<Light>(0)),
+      _frame(0),
+      _config(config),
+      _done(false) {
+        _lights->reserve(100);
+      }
+    ~Animation() = default;
 
-      Animation(const Animation&) = delete;
-      Animation& operator=(const Animation&) = delete;
+    Animation(const Animation&) = delete;
+    Animation& operator=(const Animation&) = delete;
 
-      Animation(const Animation&& other):
-        _stepper(std::move(other._stepper)),
-        _total(std::move(other._total)),
-        _is_done(other._is_done),
-        _origin(other._origin),
-        _step(other._step),
-        _light_buffer(std::move(other._light_buffer)),
-        _good(other._good)
-        {}
+    Animation(const Animation&& other):
+      _total_timer(std::move(other._total_timer)),
+      _tick_timer(std::move(other._tick_timer)),
+      _lights(std::move(other._lights)),
+      _frame(other._frame),
+      _config(other._config),
+      _done(other._done) { }
 
-      const Animation& operator=(const Animation&& other) const {
-        this->_stepper = std::move(other._stepper);
-        this->_total = std::move(other._total);
-        this->_is_done = other._is_done;
-        this->_light_buffer = std::move(other._light_buffer);
-        this->_step = other._step;
-        return *this;
+    Animation& operator=(const Animation&& other) {
+      _total_timer = std::move(other._total_timer);
+      _lights = std::move(other._lights);
+      _config = std::move(other._config);
+      _frame = other._frame;
+      _done = other._done;
+      _tick_timer = std::move(other._tick_timer);
+      return *this;
+    }
+
+    std::vector<Light>::const_iterator light_begin() const {
+      return _lights->cbegin();
+    }
+
+    std::vector<Light>::const_iterator light_end() const {
+      return _lights->cend();
+    }
+
+    std::tuple<Animation, bool> tick(uint32_t time) && {
+      if (_done) {
+        log_d("animation already complete");
+        return std::make_tuple(std::move(*this), true);
       }
 
-      AnimationLightBuffer::const_iterator lights_start() const {
-        return _light_buffer->cbegin();
+      auto [new_total, is_done] = std::move(*_total_timer).tick(time);
+
+      if (is_done) {
+        log_d("animation has completed");
+        _done = true;
+        return std::make_tuple(std::move(*this), true);
       }
 
-      AnimationLightBuffer::const_iterator lights_end() const {
-        return _light_buffer->cend();
+      auto [new_tick, tick_done] = std::move(*_tick_timer).tick(time);
+
+      _tick_timer = tick_done
+        ? std::make_unique<xr::Timer>(30)
+        : std::make_unique<xr::Timer>(std::move(new_tick));
+
+      if (tick_done) {
+        log_d("animation tick");
+        _lights->clear();
+        auto visitor = ConfigVisitor{_lights.get(), _frame};
+        std::visit(visitor, _config);
+        _frame += 1;
       }
 
-      const bool is_done() const {
-        return _is_done;
-      }
+      _total_timer = std::make_unique<xr::Timer>(std::move(new_total));
 
-      const Animation && tick(uint32_t now) const noexcept {
-        // _light_buffer->fill(std::nullopt);
+      return std::make_tuple(std::move(*this), false);
+    }
 
-        if (_is_done) {
-          return std::move(*this);
-        }
+    bool is_done() const {
+      return _done;
+    }
 
-        auto [new_step, step_done] = std::move(_stepper).tick(now);
-        _stepper = std::move(new_step);
+  private:
+    struct ConfigVisitor final {
+      ConfigVisitor(std::vector<Light> * const b, uint32_t f): _buffer(b), _frame(f) {}
 
-        // TODO: this whole computation stinks; this is just a placeholder for now to
-        // be able to show _some_ kind of time-based light sequence.
-        if (step_done) {
-          _step += 1;
-          _stepper = Timer(10);
-          uint8_t c = 0, j = 0, p = 0;
-          std::array<uint8_t, 3> color { 255, 0, 0 };
+      void operator()(const MiddleOut& config) {
+        auto [red, green, blue] = config.color;
+        auto max_capacity_iter = _buffer->capacity() / 2;
 
-          if (_good) {
-            color = (std::array<uint8_t, 3>) { 0, 255, 0 };
+        for (uint32_t i = 0; i < _frame && i < max_capacity_iter; i++) {
+          if (i + 1 > config.origin || config.origin + i > config.boundary) {
+            continue;
           }
 
-          for (uint32_t i = 0; i < _step; i++) {
-            if (c == 10 && j < 50) {
-              c = 0;
-              (*_light_buffer)[j] = std::make_pair(_origin + p, color);
-              (*_light_buffer)[j + 1] = std::make_pair(_origin - p, color);
-              p ++;
-              j += 2;
-            }
-
-            c++;
-          }
+          _buffer->push_back(std::make_tuple(config.origin + (i + 1), red, green, blue));
+          _buffer->push_back(std::make_tuple(config.origin - (i + 1), red, green, blue));
         }
-
-        auto [new_total, is_all_done] = std::move(_total).tick(now);
-
-        if (is_all_done) {
-          _is_done = true;
-          return std::move(*this);
-        }
-
-        _total = std::move(new_total);
-
-        return std::move(*this);
       }
 
-    private:
-      Timer _stepper;
-      Timer _total;
-      mutable bool _is_done;
-      const uint8_t _origin;
-      mutable uint32_t _step;
-      mutable std::unique_ptr<AnimationLightBuffer> _light_buffer;
-      const bool _good;
-  };
-}
+      std::vector<Light> * const _buffer;
+      uint32_t _frame;
+    };
+
+    mutable std::unique_ptr<xr::Timer> _total_timer;
+    mutable std::unique_ptr<xr::Timer> _tick_timer;
+    mutable std::unique_ptr<std::vector<Light>> _lights;
+    mutable uint32_t _frame;
+    mutable AnimationConfig _config;
+    mutable bool _done;
+};

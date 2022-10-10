@@ -1,348 +1,258 @@
 #pragma once
 
-#include <optional>
-#include <array>
-#include <variant>
 #include "esp32-hal-log.h"
+#include <memory>
+#include <vector>
+#include <optional>
+#include <variant>
+
 #include "timer.hpp"
 #include "direction.hpp"
 #include "message.hpp"
 
-namespace beetle_lights {
-  using ObstacleLightBuffer = std::array<std::optional<Renderable>, 100>;
+class Obstacle final {
+  private:
+    static const uint16_t ENEMY_MS_PER_MOVE = 100;
+    class FrameVisitor;
 
-  class Obstacle final {
-    private:
-      // Declare `UpdateVisitor` early for `friend` access.
-      class UpdateVisitor;
-      static const uint16_t ENEMY_MS_PER_MOVE = 100;
-      static const uint16_t ENEMY_WANDER_DISTANCE_MAX = 15;
+    struct Snake final {
+      public:
+        Snake() = delete;
+        explicit Snake(uint32_t pos):
+          _direction(Direction::LEFT),
+          _position(pos),
+          _origin(pos),
+          _movement_timer(xr::Timer(ENEMY_MS_PER_MOVE))
+          {}
+        ~Snake() = default;
 
-      static const uint16_t SNAKE_MS_PER_MOVE = 1000;
-      static const uint16_t SNAKE_EYE_SIZE_HALF = 5;
-      static const uint16_t SNAKE_WINGS_SIZE_HALF = 12;
+        Snake(const Snake&) = delete;
+        Snake& operator=(const Snake&) = delete;
 
-      static constexpr const std::array<uint8_t, 3> SNAKE_COLOR = { 255, 120, 0 };
-      static constexpr const std::array<uint8_t, 3> GOAL_COLOR = { 200, 230, 0 };
-      static constexpr const std::array<uint8_t, 3> ENEMY_COLOR = { 255, 0, 0 };
-
-      struct Snake final {
-        public:
-          Snake() = delete;
-          explicit Snake(uint32_t pos):
-            _direction(Direction::LEFT),
-            _position(pos),
-            _origin(pos),
-            _movement_timer(Timer(SNAKE_MS_PER_MOVE))
-            {}
-          ~Snake() = default;
-
-          Snake(const Snake&) = delete;
-          Snake& operator=(const Snake&) = delete;
-
-          Snake(const Snake&& other):
-            _direction(other._direction),
-            _position(other._position),
-            _origin(other._origin),
-            _movement_timer(std::move(other._movement_timer))
-            {}
-
-          const Snake& operator=(const Snake&& other) noexcept {
-            this->_direction = other._direction;
-            this->_position = other._position;
-            this->_origin = other._origin;
-            this->_movement_timer = std::move(other._movement_timer);
-            return *this;
-          }
-
-        private:
-          friend class UpdateVisitor;
-          mutable Direction _direction;
-          mutable uint32_t _position;
-          mutable uint32_t _origin;
-          const Timer _movement_timer;
-      };
-
-      struct Enemy final {
-        public:
-          Enemy() = delete;
-          explicit Enemy(uint32_t pos):
-            _direction(Direction::LEFT),
-            _position(pos),
-            _origin(pos),
-            _movement_timer(Timer(ENEMY_MS_PER_MOVE))
-            {}
-          ~Enemy() = default;
-
-          Enemy(const Enemy&) = delete;
-          Enemy& operator=(const Enemy&) = delete;
-
-          Enemy(const Enemy&& other):
-            _direction(other._direction),
-            _position(other._position),
-            _origin(other._origin),
-            _movement_timer(std::move(other._movement_timer))
-            {}
-
-          const Enemy& operator=(const Enemy&& other) noexcept {
-            this->_direction = other._direction;
-            this->_position = other._position;
-            this->_origin = other._origin;
-            this->_movement_timer = std::move(other._movement_timer);
-            return *this;
-          }
-
-        private:
-          friend class UpdateVisitor;
-          mutable Direction _direction;
-          mutable uint32_t _position;
-          mutable uint32_t _origin;
-          const Timer _movement_timer;
-      };
-
-      struct Goal final {
-        public:
-          Goal() = delete;
-          Goal(uint16_t p): position(p) {}
-          ~Goal() = default;
-
-          Goal(const Goal&) = delete;
-          Goal& operator=(const Goal&) = delete;
-
-          Goal(const Goal&& other): position(other.position) {}
-          const Goal& operator=(const Goal&& other) noexcept {
-            this->position = other.position;
-            return *this;
-          }
-
-        private:
-          friend class UpdateVisitor;
-          mutable uint16_t position;
-      };
-
-      struct Corpse final {
-        Corpse() = default;
-        ~Corpse() = default;
-
-        Corpse(const Corpse&) = delete;
-        Corpse& operator=(const Corpse&) = delete;
-
-        Corpse(const Corpse&& other) {}
-        const Corpse& operator=(const Corpse&& other) noexcept {
-          return *this;
-        }
-      };
-
-      using ObstacleKinds = std::variant<Enemy, Snake, Goal, Corpse>;
-     
-      struct UpdateVisitor final {
-        UpdateVisitor(uint32_t time, uint32_t boundary, ObstacleLightBuffer& lights, Message message):
-          _time(time),
-          _boundary(boundary),
-          _lights(lights),
-          _message(std::move(message)),
-          _light_index(0)
+        Snake(const Snake&& other):
+          _direction(other._direction),
+          _position(other._position),
+          _origin(other._origin),
+          _movement_timer(std::move(other._movement_timer))
           {}
 
-        ~UpdateVisitor() = default;
-
-        UpdateVisitor(const UpdateVisitor&) = delete;
-        UpdateVisitor& operator=(const UpdateVisitor&) = delete;
-
-        // Goal update - check for success.
-        const std::pair<ObstacleKinds, Message> operator()(const Goal& goal) const && {
-          _lights[_light_index] = std::make_pair(goal.position, GOAL_COLOR);
-
-          if (std::holds_alternative<PlayerMovement>(_message) != true) {
-            return std::make_pair(std::move(goal), std::move(_message));
-          }
-
-          auto player_movement = std::get_if<PlayerMovement>(&_message);
-
-          if (player_movement->position == goal.position) {
-            return std::make_pair(std::move(goal), Message { std::in_place_type<GoalReached> });
-          }
-
-          return std::make_pair(std::move(goal), std::move(_message));
+        const Snake& operator=(const Snake&& other) noexcept {
+          this->_direction = other._direction;
+          this->_position = other._position;
+          this->_origin = other._origin;
+          this->_movement_timer = std::move(other._movement_timer);
+          return *this;
         }
 
-        // Snake update
-        const std::pair<ObstacleKinds, Message> operator()(const Snake& snake) const && {
-          auto [updated_timer, has_moved] = std::move(snake._movement_timer).tick(_time);
-          snake._movement_timer = has_moved ? Timer(SNAKE_MS_PER_MOVE) : std::move(updated_timer);
+      private:
+        friend class FrameVisitor;
+        mutable Direction _direction;
+        mutable uint32_t _position;
+        mutable uint32_t _origin;
+        const xr::Timer _movement_timer;
+    };
 
-          auto new_position = has_moved
-            ? snake._direction == Direction::LEFT ? snake._position + 1 : snake._position - 1
-            : snake._position;
+    struct Corpse final {
+      Corpse() = default;
+      ~Corpse() = default;
 
-          if (snake._position + SNAKE_EYE_SIZE_HALF > snake._origin) {
-            snake._direction = Direction::RIGHT;
-          } else if (snake._position > SNAKE_EYE_SIZE_HALF && snake._position - SNAKE_EYE_SIZE_HALF < snake._origin) {
-            snake._direction = Direction::LEFT;
-          }
+      Corpse(const Corpse&) = delete;
+      Corpse& operator=(const Corpse&) = delete;
 
-          Message result = std::move(_message);
-
-          for (uint8_t i = 0; i < (SNAKE_WINGS_SIZE_HALF + SNAKE_WINGS_SIZE_HALF); i++) {
-            auto light_position = 0;
-
-            if (i < SNAKE_WINGS_SIZE_HALF) {
-              light_position = snake._position + i + SNAKE_EYE_SIZE_HALF;
-            } else {
-              if (snake._position < (i + SNAKE_EYE_SIZE_HALF)) {
-                continue;
-              }
-
-              light_position = snake._position - (i + SNAKE_EYE_SIZE_HALF);
-            }
-
-            if (std::holds_alternative<PlayerMovement>(_message)) {
-              auto player_movement = std::get_if<PlayerMovement>(&_message);
-              auto did_collide = player_movement->position == light_position;
-
-              if (did_collide && player_movement->is_attacking == false) {
-                result = Message { std::in_place_type<ObstacleCollision>, light_position };
-              }
-            }
-
-            _lights[_light_index] = std::make_pair(light_position, SNAKE_COLOR);
-            _light_index += 1;
-          }
-
-          snake._position = new_position;
-
-          return std::make_pair(std::move(snake), std::move(result));
-        }
-
-        // Enemy update
-        const std::pair<ObstacleKinds, Message> operator()(const Enemy& en) const && {
-          auto [updated_timer, has_moved] = std::move(en._movement_timer).tick(_time);
-          en._movement_timer = has_moved ? Timer(ENEMY_MS_PER_MOVE) : std::move(updated_timer);
-
-          auto original_position = en._position;
-
-          en._position = has_moved
-            ? en._direction == Direction::LEFT ? en._position + 1 : en._position - 1
-            : en._position;
-
-          _lights[_light_index] = std::make_pair(en._position, ENEMY_COLOR);
-          _light_index += 1;
-
-          // Make sure our origin minus the wander distance is at least 0.
-          auto max_start = en._origin >= ENEMY_WANDER_DISTANCE_MAX
-            ? en._origin - ENEMY_WANDER_DISTANCE_MAX
-            : 0;
-
-          if (en._position >= (en._origin + ENEMY_WANDER_DISTANCE_MAX)) {
-            en._direction = Direction::RIGHT;
-          } else if (en._position <= max_start) {
-            en._direction = Direction::LEFT;
-          }
-
-          // Do not bother attempting to process non-move related messages
-          if (std::holds_alternative<PlayerMovement>(_message) != true) {
-            return std::make_pair(std::move(en), std::move(_message));
-          }
-
-          auto player_movement = std::get_if<PlayerMovement>(&_message);
-
-          // If we aren't touching this obstacle we don't need to continue; we're only interested
-          // in collisions beyond this point.
-          if (player_movement->position != original_position) {
-            return std::make_pair(std::move(en), std::move(_message));
-          }
-
-          if (player_movement->is_attacking == false) {
-            log_d("player may be dead, returning collision message");
-
-            return std::make_pair(
-              std::move(en),
-              Message { std::in_place_type<ObstacleCollision>, en._position }
-            );
-          }
-
-          // At this point there was a hit and the player wasn't attacking. we are dead.
-          return std::make_pair(Corpse(), std::move(_message));
-        }
-
-        // Corpse update - no-op.
-        const std::pair<ObstacleKinds, Message> operator()(const Corpse& corpse) const && {
-          return std::make_pair(std::move(corpse), std::move(_message));
-        }
-
-        uint32_t _time;
-        uint32_t _boundary;
-        ObstacleLightBuffer& _lights;
-        mutable Message _message;
-        mutable uint32_t _light_index;
-      };
-
-    public:
-      static std::optional<std::unique_ptr<Obstacle>> try_from(char symbol, uint32_t pos) {
-        switch (symbol) {
-          case 's':
-            log_d("constructing enemy");
-
-            return std::make_unique<Obstacle>(ObstacleKinds { std::in_place_type<Snake>, pos });
-          case 'x':
-            log_d("constructing enemy");
-
-            return std::make_unique<Obstacle>(ObstacleKinds { std::in_place_type<Enemy>, pos });
-          case 'g':
-            log_d("constructing goal");
-
-            return std::make_unique<Obstacle>(ObstacleKinds { std::in_place_type<Goal>, pos });
-        }
-
-        return std::nullopt;
-      }
-
-      Obstacle(): _kind(Corpse()), _lights() {}
-      explicit Obstacle(ObstacleKinds kind): _kind(std::move(kind)), _lights() {}
-
-      ~Obstacle() = default;
-
-      Obstacle(Obstacle&) = delete;
-      Obstacle& operator=(Obstacle&) = delete;
-      Obstacle(const Obstacle&) = delete;
-      Obstacle& operator=(const Obstacle&) = delete;
-
-      Obstacle(const Obstacle&& other):
-        _kind(std::move(other._kind)),
-        _lights(std::move(other._lights))
-        {}
-
-      // @kind MovementAssigment
-      const Obstacle& operator=(const Obstacle&& other) const noexcept {
-        this->_kind = std::move(other._kind);
-        this->_lights = std::move(other._lights);
+      Corpse(const Corpse&& other) {}
+      const Corpse& operator=(const Corpse&& other) noexcept {
         return *this;
       }
+    };
 
-      ObstacleLightBuffer::const_iterator first_light(void) const {
-        return _lights.cbegin();
+    struct Pawn final {
+      public:
+        Pawn() = delete;
+        explicit Pawn(uint32_t pos):
+          _direction(Direction::LEFT),
+          _position(pos),
+          _origin(pos),
+          _movement_timer(xr::Timer(ENEMY_MS_PER_MOVE))
+          {}
+        ~Pawn() = default;
+
+        Pawn(const Pawn&) = delete;
+        Pawn& operator=(const Pawn&) = delete;
+
+        Pawn(const Pawn&& other):
+          _direction(other._direction),
+          _position(other._position),
+          _origin(other._origin),
+          _movement_timer(std::move(other._movement_timer))
+          {}
+
+        const Pawn& operator=(const Pawn&& other) noexcept {
+          this->_direction = other._direction;
+          this->_position = other._position;
+          this->_origin = other._origin;
+          this->_movement_timer = std::move(other._movement_timer);
+          return *this;
+        }
+
+      private:
+        friend class FrameVisitor;
+        mutable Direction _direction;
+        mutable uint32_t _position;
+        mutable uint32_t _origin;
+        const xr::Timer _movement_timer;
+    };
+
+    struct Goal final {
+      public:
+        Goal() = delete;
+        Goal(uint16_t p): _position(p) {}
+        ~Goal() = default;
+
+        Goal(const Goal&) = delete;
+        Goal& operator=(const Goal&) = delete;
+
+        Goal(const Goal&& other): _position(other._position) {}
+        const Goal& operator=(const Goal&& other) noexcept {
+          _position = other._position;
+          return *this;
+        }
+
+      private:
+        friend class FrameVisitor;
+        mutable uint16_t _position;
+    };
+
+    using ObstacleKind = std::variant<Pawn, Snake, Goal, Corpse>;
+
+  public:
+    Obstacle(): Obstacle(Pawn(0)) {}
+    ~Obstacle() = default;
+
+    static std::optional<Obstacle> try_from(char token, uint32_t location) {
+      switch (token) {
+        case 'x':
+          log_d("creating pawn at %d", location);
+          return Obstacle { Pawn(location) };
+        case 'g':
+          log_d("creating goal at %d", location);
+          return Obstacle { Goal(location) };
+        case 's':
+          log_d("creating snake at %d", location);
+          return Obstacle { Snake(location) };
+        default:
+          return std::nullopt;
       }
+    }
 
-      ObstacleLightBuffer::const_iterator last_light(void) const {
-        return _lights.cend();
-      }
+    Obstacle(const Obstacle&) = delete;
+    Obstacle& operator=(const Obstacle&) = delete;
 
-      // The main obstacle update function is responsible for creating a visitor with the correct state,
-      // where the visitor itself is what is ultimately responsible for handling the "pattern matching"
-      // on each enemy type.
-      const std::tuple<const Obstacle, Message> update(
-        uint32_t time,
-        Message&& message,
-        uint32_t boundary
-      ) const && noexcept {
-        _lights.fill(std::nullopt);
-        // Update our inner kind, providing it the ability to update itself.
-        auto [next_kind, obstacle_message] = std::visit(UpdateVisitor{time, boundary, _lights, std::move(message)}, _kind);
-        _kind = std::move(next_kind);
-        return std::make_tuple(std::move(*this), std::move(obstacle_message));
-      }
+    Obstacle(const Obstacle&& other):
+      _data(std::move(other._data)),
+      _kind(std::move(other._kind)) {
+    }
 
-      mutable ObstacleKinds _kind;
-      mutable ObstacleLightBuffer _lights;
-  };
-}
+    Obstacle& operator=(const Obstacle&& other) {
+      _data = std::move(other._data);
+      _kind = std::move(other._kind);
+      return *this;
+    }
+
+    std::vector<Light>::const_iterator light_begin() const {
+      return _data->cbegin();
+    }
+
+    std::vector<Light>::const_iterator light_end() const {
+      return _data->cend();
+    }
+
+    std::tuple<const Obstacle, FrameMessage> frame(uint32_t time, const FrameMessage& input) const && {
+      _data->clear();
+      auto visitor = FrameVisitor { time, input, _data.get() };
+      auto [new_kind, message] = std::visit(visitor, std::move(_kind));
+      _kind = std::move(new_kind);
+      return std::make_tuple(std::move(*this), message);
+    }
+
+  private:
+    class FrameVisitor final {
+      public:
+        explicit FrameVisitor(
+          uint32_t time,
+          const FrameMessage& input,
+          std::vector<Light> * const data
+        ): _time(time), _input(input), _data(data) {
+        }
+
+        std::tuple<ObstacleKind, FrameMessage> operator()(const Snake& snake) const {
+          _data->push_back(std::make_tuple(snake._position, 100, 100, 0));
+
+          return std::make_tuple(std::move(snake), _input);
+        }
+
+        std::tuple<ObstacleKind, FrameMessage> operator()(const Pawn& pawn) const {
+          auto [updated_timer, has_moved] = std::move(pawn._movement_timer).tick(_time);
+          pawn._movement_timer = has_moved ? xr::Timer(ENEMY_MS_PER_MOVE) : std::move(updated_timer);
+
+          if (std::holds_alternative<PlayerMovement>(_input)) {
+            auto player_movement = std::get_if<PlayerMovement>(&_input);
+            bool did_collide = player_movement->position == pawn._position;
+
+            if (did_collide) {
+              return player_movement->attacking
+                ? std::make_tuple<ObstacleKind>(Corpse(), _input)
+                : std::make_tuple<ObstacleKind>(std::move(pawn), ObstacleCollision { pawn._position });
+            }
+          }
+
+          if (has_moved) {
+            pawn._position = pawn._direction == Direction::LEFT
+              ? pawn._position + 1
+              : pawn._position - 1;
+
+            if (pawn._direction == Direction::LEFT && pawn._position > (pawn._origin + 10)) {
+              pawn._direction = Direction::RIGHT;
+            } else if (pawn._direction == Direction::RIGHT && pawn._position < (pawn._origin - 10)) {
+              pawn._direction = Direction::LEFT;
+            }
+          }
+
+          _data->push_back(std::make_tuple(pawn._position, 255, 0, 0));
+
+          return std::make_pair(std::move(pawn), _input);
+        }
+
+        std::tuple<ObstacleKind, FrameMessage> operator()(const Goal& goal) const {
+          _data->push_back(std::make_tuple(goal._position, 200, 200, 200));
+
+          if (std::holds_alternative<PlayerMovement>(_input)) {
+            auto player_movement = std::get_if<PlayerMovement>(&_input);
+            bool did_collide = player_movement->position == goal._position;
+
+            if (did_collide) {
+              return std::make_tuple<ObstacleKind>(std::move(goal), GoalReached { });
+            }
+          }
+
+          return std::make_tuple(std::move(goal), _input);
+        }
+
+        std::tuple<ObstacleKind, FrameMessage> operator()(const Corpse& corpse) const {
+          return std::make_tuple(std::move(corpse), _input);
+        }
+
+      private:
+        uint32_t _time;
+        const FrameMessage& _input;
+        std::vector<Light> * const _data;
+    };
+
+    explicit Obstacle(ObstacleKind&& kind):
+      _data(new std::vector<Light>(0)),
+      _kind(std::move(kind)) {
+      _data->reserve(OBJECT_BUFFER_SIZE);
+    }
+
+    mutable std::unique_ptr<std::vector<Light>> _data;
+    mutable ObstacleKind _kind;
+};

@@ -2,7 +2,7 @@
 
 #include "esp32-hal-log.h"
 
-namespace beetle_lights {
+namespace xr {
   struct Timer final {
     public:
       explicit Timer(uint32_t amount):
