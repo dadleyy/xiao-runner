@@ -49,6 +49,7 @@ namespace beetle_lights {
 
             if (mapped_position > _boundary) {
               log_e("attempting to create level with out-of-bounds obstacle: %d", mapped_position);
+              continue;
             }
 
             auto attempt = Obstacle::try_from(*cursor, mapped_position);
@@ -129,7 +130,7 @@ namespace beetle_lights {
             }
 
             auto [new_state, new_player_update] = std::move(obstacle->value())
-              .update(time, std::move(player_update));
+              .update(time, std::move(player_update), 0);
 
             // With the updated obstacle state, update our own copy of the lights that we will render next frame.
             for (auto ob_light = new_state.first_light(); ob_light != new_state.last_light(); ob_light++) {

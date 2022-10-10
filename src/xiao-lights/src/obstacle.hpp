@@ -9,13 +9,22 @@
 #include "message.hpp"
 
 namespace beetle_lights {
-  using ObstacleLightBuffer = std::array<std::optional<Renderable>, 20>;
+  using ObstacleLightBuffer = std::array<std::optional<Renderable>, 100>;
 
   class Obstacle final {
     private:
       // Declare `UpdateVisitor` early for `friend` access.
       class UpdateVisitor;
       static const uint16_t ENEMY_MS_PER_MOVE = 100;
+      static const uint16_t ENEMY_WANDER_DISTANCE_MAX = 15;
+
+      static const uint16_t SNAKE_MS_PER_MOVE = 1000;
+      static const uint16_t SNAKE_EYE_SIZE_HALF = 5;
+      static const uint16_t SNAKE_WINGS_SIZE_HALF = 12;
+
+      static constexpr const std::array<uint8_t, 3> SNAKE_COLOR = { 255, 120, 0 };
+      static constexpr const std::array<uint8_t, 3> GOAL_COLOR = { 200, 230, 0 };
+      static constexpr const std::array<uint8_t, 3> ENEMY_COLOR = { 255, 0, 0 };
 
       struct Snake final {
         public:
@@ -24,7 +33,7 @@ namespace beetle_lights {
             _direction(Direction::LEFT),
             _position(pos),
             _origin(pos),
-            _movement_timer(Timer(ENEMY_MS_PER_MOVE))
+            _movement_timer(Timer(SNAKE_MS_PER_MOVE))
             {}
           ~Snake() = default;
 
@@ -127,20 +136,22 @@ namespace beetle_lights {
       using ObstacleKinds = std::variant<Enemy, Snake, Goal, Corpse>;
      
       struct UpdateVisitor final {
-        UpdateVisitor(uint32_t time, ObstacleLightBuffer& lights, Message message):
+        UpdateVisitor(uint32_t time, uint32_t boundary, ObstacleLightBuffer& lights, Message message):
           _time(time),
+          _boundary(boundary),
           _lights(lights),
           _message(std::move(message)),
           _light_index(0)
           {}
 
-        ~UpdateVisitor() {}
+        ~UpdateVisitor() = default;
 
         UpdateVisitor(const UpdateVisitor&) = delete;
         UpdateVisitor& operator=(const UpdateVisitor&) = delete;
 
+        // Goal update - check for success.
         const std::pair<ObstacleKinds, Message> operator()(const Goal& goal) const && {
-          _lights[_light_index] = std::make_pair(goal.position, (std::array<uint8_t, 3>) { 255, 255, 0 });
+          _lights[_light_index] = std::make_pair(goal.position, GOAL_COLOR);
 
           if (std::holds_alternative<PlayerMovement>(_message) != true) {
             return std::make_pair(std::move(goal), std::move(_message));
@@ -155,29 +166,77 @@ namespace beetle_lights {
           return std::make_pair(std::move(goal), std::move(_message));
         }
 
-        const std::pair<ObstacleKinds, Message> operator()(const Snake& en) const && {
-          return std::make_pair(std::move(en), std::move(_message));
+        // Snake update
+        const std::pair<ObstacleKinds, Message> operator()(const Snake& snake) const && {
+          auto [updated_timer, has_moved] = std::move(snake._movement_timer).tick(_time);
+          snake._movement_timer = has_moved ? Timer(SNAKE_MS_PER_MOVE) : std::move(updated_timer);
+
+          auto new_position = has_moved
+            ? snake._direction == Direction::LEFT ? snake._position + 1 : snake._position - 1
+            : snake._position;
+
+          if (snake._position + SNAKE_EYE_SIZE_HALF > snake._origin) {
+            snake._direction = Direction::RIGHT;
+          } else if (snake._position > SNAKE_EYE_SIZE_HALF && snake._position - SNAKE_EYE_SIZE_HALF < snake._origin) {
+            snake._direction = Direction::LEFT;
+          }
+
+          Message result = std::move(_message);
+
+          for (uint8_t i = 0; i < (SNAKE_WINGS_SIZE_HALF + SNAKE_WINGS_SIZE_HALF); i++) {
+            auto light_position = 0;
+
+            if (i < SNAKE_WINGS_SIZE_HALF) {
+              light_position = snake._position + i + SNAKE_EYE_SIZE_HALF;
+            } else {
+              if (snake._position < (i + SNAKE_EYE_SIZE_HALF)) {
+                continue;
+              }
+
+              light_position = snake._position - (i + SNAKE_EYE_SIZE_HALF);
+            }
+
+            if (std::holds_alternative<PlayerMovement>(_message)) {
+              auto player_movement = std::get_if<PlayerMovement>(&_message);
+              auto did_collide = player_movement->position == light_position;
+
+              if (did_collide && player_movement->is_attacking == false) {
+                result = Message { std::in_place_type<ObstacleCollision>, light_position };
+              }
+            }
+
+            _lights[_light_index] = std::make_pair(light_position, SNAKE_COLOR);
+            _light_index += 1;
+          }
+
+          snake._position = new_position;
+
+          return std::make_pair(std::move(snake), std::move(result));
         }
 
+        // Enemy update
         const std::pair<ObstacleKinds, Message> operator()(const Enemy& en) const && {
           auto [updated_timer, has_moved] = std::move(en._movement_timer).tick(_time);
           en._movement_timer = has_moved ? Timer(ENEMY_MS_PER_MOVE) : std::move(updated_timer);
 
-          _lights[_light_index] = std::make_pair(en._position, (std::array<uint8_t, 3>) { 255, 0, 0 });
-          _light_index += 1;
-
           auto original_position = en._position;
 
-          if (has_moved) {
-            en._position = en._direction == Direction::LEFT
-              ? en._position + 1
-              : en._position - 1;
+          en._position = has_moved
+            ? en._direction == Direction::LEFT ? en._position + 1 : en._position - 1
+            : en._position;
 
-            if (en._direction == Direction::LEFT && en._position > (en._origin + 10)) {
-              en._direction = Direction::RIGHT;
-            } else if (en._direction == Direction::RIGHT && en._position < (en._origin - 10)) {
-              en._direction = Direction::LEFT;
-            }
+          _lights[_light_index] = std::make_pair(en._position, ENEMY_COLOR);
+          _light_index += 1;
+
+          // Make sure our origin minus the wander distance is at least 0.
+          auto max_start = en._origin >= ENEMY_WANDER_DISTANCE_MAX
+            ? en._origin - ENEMY_WANDER_DISTANCE_MAX
+            : 0;
+
+          if (en._position >= (en._origin + ENEMY_WANDER_DISTANCE_MAX)) {
+            en._direction = Direction::RIGHT;
+          } else if (en._position <= max_start) {
+            en._direction = Direction::LEFT;
           }
 
           // Do not bother attempting to process non-move related messages
@@ -187,7 +246,8 @@ namespace beetle_lights {
 
           auto player_movement = std::get_if<PlayerMovement>(&_message);
 
-          // If we aren't touching this obstacle, ignore.
+          // If we aren't touching this obstacle we don't need to continue; we're only interested
+          // in collisions beyond this point.
           if (player_movement->position != original_position) {
             return std::make_pair(std::move(en), std::move(_message));
           }
@@ -205,11 +265,13 @@ namespace beetle_lights {
           return std::make_pair(Corpse(), std::move(_message));
         }
 
+        // Corpse update - no-op.
         const std::pair<ObstacleKinds, Message> operator()(const Corpse& corpse) const && {
           return std::make_pair(std::move(corpse), std::move(_message));
         }
 
         uint32_t _time;
+        uint32_t _boundary;
         ObstacleLightBuffer& _lights;
         mutable Message _message;
         mutable uint32_t _light_index;
@@ -265,18 +327,17 @@ namespace beetle_lights {
         return _lights.cend();
       }
 
+      // The main obstacle update function is responsible for creating a visitor with the correct state,
+      // where the visitor itself is what is ultimately responsible for handling the "pattern matching"
+      // on each enemy type.
       const std::tuple<const Obstacle, Message> update(
         uint32_t time,
-        Message&& message
+        Message&& message,
+        uint32_t boundary
       ) const && noexcept {
-        // Clear out our light buffer.
-        for (uint32_t i = 0; i < _lights.size(); i++) {
-          _lights[i] = std::nullopt;
-        }
-
+        _lights.fill(std::nullopt);
         // Update our inner kind, providing it the ability to update itself.
-        auto [next_kind, obstacle_message] = std::visit(UpdateVisitor{time, _lights, std::move(message)}, _kind);
-
+        auto [next_kind, obstacle_message] = std::visit(UpdateVisitor{time, boundary, _lights, std::move(message)}, _kind);
         _kind = std::move(next_kind);
         return std::make_tuple(std::move(*this), std::move(obstacle_message));
       }

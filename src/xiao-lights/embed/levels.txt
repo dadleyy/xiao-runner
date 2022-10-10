@@ -1,5 +1,5 @@
 1                                                                      144
-p            x                    s                                    g
-p                                 x                                    g
 p                                 x                                    g
 p               x                                     x                g
+p               x                 x                   x                g
+p               x                 s                                    g
