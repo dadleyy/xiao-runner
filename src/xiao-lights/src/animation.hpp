@@ -2,7 +2,7 @@
 
 #include <variant>
 #include "timer.hpp"
-#include "direction.hpp"
+#include "types.hpp"
 
 class Animation final {
   public:
@@ -75,7 +75,6 @@ class Animation final {
         : std::make_unique<xr::Timer>(std::move(new_tick));
 
       if (tick_done) {
-        log_d("animation tick");
         _lights->clear();
         auto visitor = ConfigVisitor{_lights.get(), _frame};
         std::visit(visitor, _config);

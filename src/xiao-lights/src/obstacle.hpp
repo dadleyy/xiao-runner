@@ -7,12 +7,20 @@
 #include <variant>
 
 #include "timer.hpp"
-#include "direction.hpp"
-#include "message.hpp"
+#include "types.hpp"
 
 class Obstacle final {
   private:
+    constexpr static const uint32_t OBJECT_BUFFER_SIZE = 30;
     static const uint16_t ENEMY_MS_PER_MOVE = 100;
+    static const uint16_t SNAKE_MS_PER_MOVE = 1000;
+    static const uint16_t SNAKE_EYE_SIZE_HALF = 5;
+    static const uint16_t SNAKE_WINGS_SIZE_HALF = 12;
+
+    constexpr static const std::tuple<uint8_t, uint8_t, uint8_t> SNAKE_COLOR = std::make_tuple(255, 100, 0);
+    constexpr static const std::tuple<uint8_t, uint8_t, uint8_t> PAWN_COLOR = std::make_tuple(255, 20, 0);
+    constexpr static const std::tuple<uint8_t, uint8_t, uint8_t> GOAL_COLOR = std::make_tuple(100, 150, 0);
+
     class FrameVisitor;
 
     struct Snake final {
@@ -185,9 +193,52 @@ class Obstacle final {
         }
 
         std::tuple<ObstacleKind, FrameMessage> operator()(const Snake& snake) const {
-          _data->push_back(std::make_tuple(snake._position, 100, 100, 0));
+          auto [updated_timer, has_moved] = std::move(snake._movement_timer).tick(_time);
+          snake._movement_timer = has_moved
+            ? xr::Timer(SNAKE_MS_PER_MOVE)
+            : std::move(updated_timer);
 
-          return std::make_tuple(std::move(snake), _input);
+          auto new_position = has_moved
+            ? snake._direction == Direction::LEFT ? snake._position + 1 : snake._position - 1
+            : snake._position;
+
+          if (snake._position + SNAKE_EYE_SIZE_HALF > snake._origin) {
+            snake._direction = Direction::RIGHT;
+          } else if (snake._position > SNAKE_EYE_SIZE_HALF && snake._position - SNAKE_EYE_SIZE_HALF < snake._origin) {
+            snake._direction = Direction::LEFT;
+          }
+
+          FrameMessage result = std::move(_input);
+
+          for (uint32_t i = 0; i < (SNAKE_WINGS_SIZE_HALF + SNAKE_WINGS_SIZE_HALF); i++) {
+            uint32_t light_position = 0;
+
+            if (i < SNAKE_WINGS_SIZE_HALF) {
+              light_position = snake._position + i + SNAKE_EYE_SIZE_HALF;
+            } else {
+              if (snake._position < (i + SNAKE_EYE_SIZE_HALF)) {
+                continue;
+              }
+
+              light_position = snake._position - (i + SNAKE_EYE_SIZE_HALF);
+            }
+
+            if (std::holds_alternative<PlayerMovement>(result)) {
+              auto player_movement = std::get_if<PlayerMovement>(&result);
+              auto did_collide = player_movement->position == light_position;
+
+              if (did_collide && player_movement->attacking == false) {
+                result = ObstacleCollision { light_position };
+              }
+            }
+
+            auto [red, green, blue] = SNAKE_COLOR;
+            _data->push_back(std::make_tuple(light_position, red, green, blue));
+          }
+
+          snake._position = new_position;
+
+          return std::make_tuple(std::move(snake), std::move(result));
         }
 
         std::tuple<ObstacleKind, FrameMessage> operator()(const Pawn& pawn) const {
@@ -217,13 +268,15 @@ class Obstacle final {
             }
           }
 
-          _data->push_back(std::make_tuple(pawn._position, 255, 0, 0));
+          auto [red, green, blue] = PAWN_COLOR;
+          _data->push_back(std::make_tuple(pawn._position, red, green, blue));
 
           return std::make_pair(std::move(pawn), _input);
         }
 
         std::tuple<ObstacleKind, FrameMessage> operator()(const Goal& goal) const {
-          _data->push_back(std::make_tuple(goal._position, 200, 200, 200));
+          auto [red, green, blue] = GOAL_COLOR;
+          _data->push_back(std::make_tuple(goal._position, red, green, blue));
 
           if (std::holds_alternative<PlayerMovement>(_input)) {
             auto player_movement = std::get_if<PlayerMovement>(&_input);

@@ -1,13 +1,16 @@
 #pragma once
 
 #include "timer.hpp"
+#include "types.hpp"
 #include "animation.hpp"
-#include "message.hpp"
 #include "obstacle.hpp"
 #include "player.hpp"
 
 class Level final {
   public:
+    constexpr static const uint32_t LEVEL_BUFFER_SIZE = 256;
+    constexpr static const uint32_t OBSTACLE_BUFFER_SIZE = 15;
+
     enum LevelStateKind {
       IN_PROGRESS,
       FAILED,
@@ -22,7 +25,7 @@ class Level final {
       _state(LevelStateKind::IN_PROGRESS),
       _boundary(bound) {
         _obstacles->reserve(OBSTACLE_BUFFER_SIZE);
-        _data->reserve(CONTAINER_BUFFER_SIZE);
+        _data->reserve(LEVEL_BUFFER_SIZE);
 
         const char * cursor = std::get<0>(layout);
         uint32_t index = 0;

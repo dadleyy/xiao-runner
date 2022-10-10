@@ -8,7 +8,7 @@
 #include <variant>
 
 #include "timer.hpp"
-#include "message.hpp"
+#include "types.hpp"
 #include "player.hpp"
 #include "obstacle.hpp"
 #include "level.hpp"

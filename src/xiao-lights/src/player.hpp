@@ -5,16 +5,19 @@
 #include <vector>
 
 #include "timer.hpp"
-#include "direction.hpp"
-#include "message.hpp"
+#include "types.hpp"
 
 class Player final {
   public:
-    const static uint32_t PLAYER_MOVEMENT_SPEED = 10;
-    const static uint32_t PLAYER_DEBUFF_DURATION = 2000;
-    const static uint32_t PLAYER_ATTACK_DURATION = 1000;
-    const static uint32_t X_TOLERANCE_MIN = 1000;
-    const static uint32_t X_TOLERANCE_MAX = 3000;
+    static const uint32_t PLAYER_MOVEMENT_SPEED = 10;
+    static const uint32_t PLAYER_DEBUFF_DURATION = 2000;
+    static const uint32_t PLAYER_ATTACK_DURATION = 1000;
+    static const uint32_t X_TOLERANCE_MIN = 1000;
+    static const uint32_t X_TOLERANCE_MAX = 3000;
+    static const uint32_t OBJECT_BUFFER_SIZE = 2;
+    constexpr static const std::tuple<uint8_t, uint8_t, uint8_t> ATTACKING_COLOR = std::make_tuple(0, 255, 0);
+    constexpr static const std::tuple<uint8_t, uint8_t, uint8_t> IDLE_COLOR = std::make_tuple(255, 255, 255);
+    constexpr static const std::tuple<uint8_t, uint8_t, uint8_t> RECOVERING_COLOR = std::make_tuple(10, 180, 255);
 
     Player():
       _data(new std::vector<Light>(0)),
@@ -128,15 +131,21 @@ class Player final {
       }
 
       switch (_kind) {
-        case PlayerStateKind::ATTACKING:
-          _data->push_back(std::make_tuple(_position, 0, 255, 0));
+        case PlayerStateKind::ATTACKING: {
+          auto [red, green, blue] = ATTACKING_COLOR;
+          _data->push_back(std::make_tuple(_position, red, green, blue));
           break;
-        case PlayerStateKind::RECOVERING:
-          _data->push_back(std::make_tuple(_position, 30, 255, 200));
+        }
+        case PlayerStateKind::RECOVERING: {
+          auto [red, green, blue] = RECOVERING_COLOR;
+          _data->push_back(std::make_tuple(_position, red, green, blue));
           break;
-        default:
-          _data->push_back(std::make_tuple(_position, 255, 255, 255));
+        }
+        default: {
+          auto [red, green, blue] = IDLE_COLOR;
+          _data->push_back(std::make_tuple(_position, red, green, blue));
           break;
+        }
       }
 
       return std::make_tuple(

@@ -1,4 +1,5 @@
 p                                                             x                                                                               g
+p                                                             s                                                                               g
 p               x                                                                                           x                                 g
 p               x                                             x                                             x                                 g
 p               x                   x                         x                      x                      x                                 g
