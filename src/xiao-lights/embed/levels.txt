@@ -1,0 +1,9 @@
+p                                                             x                                                                               g
+p                                                             s                                                                               g
+p               x                                                                                           x                                 g
+p               x                                             x                                             x                                 g
+p               x                   x                         x                      x                      x                                 g
+p               x                                             s                                             x                                 g
+p               s                                             x                                             s                                 g
+p               s                                             s                                             s                                 g
+p               s                   x                         s                      x                      s                                 g
