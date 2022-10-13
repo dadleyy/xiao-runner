@@ -32,11 +32,7 @@ $ pio run -t upload
 
 ## Inspiration
 
-This project was inspired by the [line wobbler](https://wobblylabs.com/projects/wobbler) project; a much more
-impressive + featured version that is available at the [wonderville](https://www.wonderville.nyc/) bar in nyc.
-
-Additionally, the code here is meant to explore c++ move semantics, and the use of c++17's [`variant`][variant]
-type, which provides a similar design experience to enumerated types in other languages (e.g, rust).
+See [`inspiration.md`][insp]
 
 [xiao]: https://www.seeedstudio.com/Seeed-XIAO-ESP32C3-p-5431.html
 [platformio]: https://platformio.org/
@@ -47,3 +43,4 @@ type, which provides a similar design experience to enumerated types in other la
 [variant]: https://en.cppreference.com/w/cpp/utility/variant
 [`src/xiao-controller`]: ./src/xiao-controller
 [`src/xiao-lights`]: ./src/xiao-lights
+[insp]: https://gist.github.com/dadleyy/edc6ead991f363764fc5f1a3a47fb630#file-inspiration-md

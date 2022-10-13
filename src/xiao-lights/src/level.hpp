@@ -20,7 +20,6 @@ class Level final {
     explicit Level(std::pair<const char *, uint32_t> layout, uint32_t bound):
       _impl(RunningState()),
       _data(new std::vector<Light>(0)),
-      _state(LevelStateKind::IN_PROGRESS),
       _boundary(bound) {
         _data->reserve(LEVEL_BUFFER_SIZE);
 
@@ -50,14 +49,12 @@ class Level final {
     Level(const Level&& other):
       _impl(std::move(other._impl)),
       _data(std::move(other._data)),
-      _state(other._state),
       _boundary(other._boundary) {
       }
 
     const Level& operator=(const Level&& other) const {
       _impl = std::move(other._impl);
       _boundary = other._boundary;
-      _state = other._state;
       _data = std::move(other._data);
       return *this;
     }
@@ -71,7 +68,17 @@ class Level final {
     }
 
     LevelStateKind state() const {
-      return LevelStateKind::IN_PROGRESS;
+      if (std::holds_alternative<CompletedState>(_impl) != true) {
+        return LevelStateKind::IN_PROGRESS;
+      }
+
+      auto completed = std::get_if<CompletedState>(&_impl);
+
+      if (completed->_completion_timer->is_done() != true) {
+        return LevelStateKind::IN_PROGRESS;
+      }
+
+      return completed->_result ? LevelStateKind::COMPLETE : LevelStateKind::FAILED;
     }
 
     const Level frame(uint32_t current_time, const std::optional<ControllerInput>& input) const && noexcept {
@@ -106,20 +113,28 @@ class Level final {
     };
 
     struct CompletedState final {
-      CompletedState(uint32_t boundary):
-        _completion_timer(new Animation(Animation::MiddleOut { boundary / 2, boundary, std::make_tuple(255, 0, 0) })) {
+      CompletedState(bool success, uint32_t boundary):
+        _completion_timer(new Animation(Animation::MiddleOut {
+          boundary / 2, boundary,
+          success ? std::make_tuple(0, 255, 0) : std::make_tuple(255, 0, 0)
+        })),
+        _result(success) {
         }
       ~CompletedState() = default;
       CompletedState(const CompletedState&) = delete;
       CompletedState& operator=(const CompletedState&) = delete;
-      CompletedState(const CompletedState&& other): _completion_timer(std::move(other._completion_timer)) {
+      CompletedState(const CompletedState&& other):
+        _completion_timer(std::move(other._completion_timer)),
+        _result(other._result) {
       }
       CompletedState& operator=(const CompletedState&& other) {
+        _result = other._result;
         _completion_timer = std::move(other._completion_timer);
         return *this;
       }
 
       mutable std::unique_ptr<Animation> _completion_timer;
+      mutable bool _result;
     };
 
     using InnerState = std::variant<RunningState, CompletedState>;
@@ -152,17 +167,26 @@ class Level final {
         if (std::holds_alternative<GoalReached>(message)) {
           light_buffer->clear();
 
-          return CompletedState(boundary);
+          return CompletedState(true, boundary);
         } else if (std::holds_alternative<ObstacleCollision>(message)) {
           light_buffer->clear();
 
-          return CompletedState(boundary);
+          return CompletedState(false, boundary);
         }
 
         return std::move(running);
       }
 
       InnerState operator()(const CompletedState& completed) {
+        auto [new_timer, is_done] = std::move(*completed._completion_timer).tick(current_time);
+        completed._completion_timer = std::make_unique<Animation>(std::move(new_timer));
+
+        auto anim_start = completed._completion_timer->light_begin();
+        auto anim_end = completed._completion_timer->light_end();
+        for (auto light = anim_start; light != anim_end; light++) {
+          light_buffer->push_back(*light);
+        }
+
         return std::move(completed);
       }
     };
@@ -170,6 +194,5 @@ class Level final {
 
     mutable InnerState _impl;
     mutable std::unique_ptr<std::vector<Light>> _data;
-    mutable LevelStateKind _state;
     mutable uint32_t _boundary;
 };

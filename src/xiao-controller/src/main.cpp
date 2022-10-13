@@ -19,7 +19,8 @@ typedef struct message_payload {
 } message_payload_t;
 
 // MAC address of beetle-lights.
-constexpr const uint8_t broadcast_address[] = {0xA0, 0x76, 0x4E, 0x44, 0xFA, 0x8C};
+constexpr const uint8_t broadcast_address[] = {0xA0, 0x76, 0x4E, 0x44, 0xD5, 0xF4};
+// constexpr const uint8_t broadcast_address[] = {0xA0, 0x76, 0x4E, 0x44, 0xFA, 0x8C};
 
 esp_now_peer_info_t peer_info;
 message_payload_t message_payload;
