@@ -6,6 +6,14 @@
 #define Y_AXIS_PIN A1
 #define Z_BUTTON_PIN A2
 
+#ifndef X_TOLERANCE_LOWER
+#define X_TOLERANCE_LOWER 1200
+#endif
+
+#ifndef X_TOLERANCE_UPPER
+#define X_TOLERANCE_UPPER 3200
+#endif
+
 //
 // Beetle Controller
 //
@@ -158,8 +166,20 @@ void loop(void) {
 
   delay(10);
 
-  int32_t x_position = analogRead(X_AXIS_PIN);
-  int32_t y_position = analogRead(Y_AXIS_PIN);
+#ifndef SWAP_XY_POSITION
+  int32_t raw_x = analogRead(X_AXIS_PIN);
+  int32_t raw_y = analogRead(Y_AXIS_PIN);
+#else
+  int32_t raw_y = analogRead(X_AXIS_PIN);
+  int32_t raw_x = analogRead(Y_AXIS_PIN);
+#endif
+
+  auto y_position = raw_y > X_TOLERANCE_UPPER
+    ? 1
+    : (raw_y < X_TOLERANCE_LOWER ? 2 : 0);
+  auto x_position = raw_x > X_TOLERANCE_UPPER
+    ? 1
+    : (raw_x < X_TOLERANCE_LOWER ? 2 : 0);
 
   // TODO(hardware-understanding) The push button switch appears to be normally closed when tested
   // by a voltmeter (the voltmeter reads "open loop" (0L) until pressed). 
