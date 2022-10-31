@@ -12,8 +12,6 @@ class Player final {
     static const uint32_t PLAYER_MOVEMENT_SPEED = 10;
     static const uint32_t PLAYER_DEBUFF_DURATION = 2000;
     static const uint32_t PLAYER_ATTACK_DURATION = 1000;
-    static const uint32_t X_TOLERANCE_MIN = 1000;
-    static const uint32_t X_TOLERANCE_MAX = 3000;
     static const uint32_t OBJECT_BUFFER_SIZE = 2;
     constexpr static const std::tuple<uint8_t, uint8_t, uint8_t> ATTACKING_COLOR = std::make_tuple(0, 255, 0);
     constexpr static const std::tuple<uint8_t, uint8_t, uint8_t> IDLE_COLOR = std::make_tuple(255, 255, 255);
@@ -112,12 +110,17 @@ class Player final {
       if (input != std::nullopt) {
         auto x_input = std::get<0>(*input);
 
-        if (x_input > X_TOLERANCE_MAX) {
+        // Controller inputs:
+        //
+        // - `0` -> neutral position
+        // - `1` -> right position
+        // - `2` -> left position
+        if (x_input == 1) {
           if (_direction != Direction::RIGHT) {
             log_d("moving right (%d)", x_input);
           }
           _direction = Direction::RIGHT;
-        } else if (x_input < X_TOLERANCE_MIN) {
+        } else if (x_input == 2) {
           if (_direction != Direction::LEFT) {
             log_d("moving left (%d)", x_input);
           }

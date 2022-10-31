@@ -27,14 +27,34 @@ struct MessagePayload final {
   char content[120];
 };
 
-static MessagePayload frame_payload;
-static std::optional<ControllerInput> last_input = std::nullopt;
-static std::unique_ptr<const Level> current_level(nullptr);
+enum ERuntimeMode {
+  RUNNING,
+  DISCONNECTED,
+  FAILED
+};
+
 static const uint32_t debug_timer_ms = 2000;
-static std::unique_ptr<xr::Timer> debug_timer(nullptr);
+static const uint32_t max_nomessage_time = 10000;
+
+// Every message received by our esp-now listener will update this gloval state.
+static MessagePayload frame_payload;
+
+// Once received the esp now messages will be parsed into an optional controller input that will be
+// sent into every frame of our game logic.
+static std::optional<ControllerInput> last_input = std::nullopt;
+
+// Current level and indices into our embedded memory for where levels exist.
 static std::vector<std::pair<const char *, uint32_t>> level_indices;
+static std::unique_ptr<const Level> current_level(nullptr);
 static uint32_t current_level_index = 0;
+
+static std::unique_ptr<xr::Timer> debug_timer(nullptr);
 static Adafruit_NeoPixel pixels(num_pixels, pixel_pin);
+
+// Disconnected state.
+static uint32_t active_wifi_connections = 0;
+static ERuntimeMode mode = ERuntimeMode::DISCONNECTED;
+static uint32_t last_message_time = 0;
 
 // The messages sent from the `beetle-controller` are received and parsed into a tuple containing
 // three unsigned integer values - x, y and z (button press).
@@ -81,7 +101,23 @@ ControllerInput parse_message(const char* data, int max_len) {
 void receive_cb(const uint8_t * mac, const uint8_t *incoming_data, int len) {
   memset(frame_payload.content, '\0', 120);
   memcpy(&frame_payload, incoming_data, sizeof(frame_payload));
+  last_message_time = millis();
   last_input = parse_message(frame_payload.content, len);
+}
+
+void on_connect(WiFiEvent_t event, WiFiEventInfo_t info) {
+  if (event == ARDUINO_EVENT_WIFI_AP_STADISCONNECTED) {
+    log_d("client disconnected");
+
+    if (active_wifi_connections != 0) {
+      active_wifi_connections -= 1;
+    }
+
+    return;
+  }
+
+  log_d("client connected");
+  active_wifi_connections += 1;
 }
 
 void setup(void) {
@@ -91,6 +127,7 @@ void setup(void) {
   delay(1000);
 
   log_d("initializing game engine");
+  debug_timer = std::make_unique<xr::Timer>(debug_timer_ms);
   pixels.begin();
   pixels.setBrightness(20);
   pixels.fill(Adafruit_NeoPixel::Color(0, 0, 0));
@@ -100,7 +137,7 @@ void setup(void) {
   uint32_t level_size = 0;
 
   while (cursor != level_data_end) {
-    if (*cursor != '\n') {
+    if (*cursor != '\n' || *cursor == ':') {
       level_size++;
       cursor++;
       continue;
@@ -116,26 +153,83 @@ void setup(void) {
   current_level = std::make_unique<Level>(
     level_indices.size() > 0 ? Level{ level_indices[current_level_index], num_pixels } : Level {}
   );
-
-  log_d("initializing wifi");
-  // WiFi/esp-now initialization.
-  WiFi.mode(WIFI_MODE_STA);
-  Serial.println(WiFi.macAddress());
-  if (esp_now_init() != ESP_OK) {
-    log_e("unable to initialize esp_now");
-    return;
-  }
-  esp_now_register_recv_cb(receive_cb);
-  debug_timer = std::make_unique<xr::Timer>(debug_timer_ms);
   log_d("setup complete");
 }
 
 void loop(void) {
-  if (current_level == nullptr) {
+  // While we haven't had a client connected for some time, our loop in a single frame until we receive one
+  // connection to our access point.
+  if (mode == ERuntimeMode::DISCONNECTED) {
+    pixels.fill(Adafruit_NeoPixel::Color(0, 0, 0));
+    pixels.show();
+
+    // Start our wifi access point
+    WiFi.mode(WIFI_AP);
+
+    // Register some callbacks so we know when a client connects.
+    WiFi.onEvent(on_connect, ARDUINO_EVENT_WIFI_AP_STACONNECTED);
+    WiFi.onEvent(on_connect, ARDUINO_EVENT_WIFI_AP_STADISCONNECTED);
+
+    // Create the SSID; start broadcasting.
+    bool result = WiFi.softAP("xiao-runner-light-host", "lights-host", 1, 0);
+
+    if (!result) {
+      mode = ERuntimeMode::FAILED;
+      log_e("unable to start in soft ap mode");
+      return;
+    }
+
+    // Wait until we have a connection; this will block the current `loop` until there is a connection.
+    while (active_wifi_connections == 0) {
+      auto now = millis();
+      auto [new_timer, did_finish] = std::move(*debug_timer).tick(now);
+      debug_timer = did_finish
+        ? std::make_unique<xr::Timer>(debug_timer_ms)
+        : std::make_unique<xr::Timer>(std::move(new_timer));
+
+      if (did_finish) {
+        log_d("still waiting for connection...");
+        Serial.println(WiFi.macAddress());
+        log_d("^-- my mac address");
+      }
+    }
+
+    // Before terminating our access point, sleep for a small amount of time to allow things to settle.
+    log_d("sleeping for a second to allow wifi to settle before terminating access point");
+    delay(1000);
+
+    // Remove callbacks, stop access point.
+    WiFi.disconnect();
+    log_d("sleeping for a second to settle with disconnected wifi");
+    delay(200);
+    log_d("awake, starting esp-now");
+
+    // Switch into station mode, print our mac address and start esp-now.
+    WiFi.mode(WIFI_MODE_STA);
+    log_d("[WIFI] initializing wifi, my mac address is:");
+    Serial.println(WiFi.macAddress());
+    log_d("^ mac address");
+
+    if (esp_now_init() != ESP_OK) {
+      mode = ERuntimeMode::FAILED;
+      log_e("unable to initialize esp_now");
+      return;
+    }
+
+    // Move into our "running" state
+    log_d("esp-now ready, client should be connecting soon");
+    last_message_time = millis();
+    esp_now_register_recv_cb(receive_cb);
+    mode = ERuntimeMode::RUNNING;
+    return;
+  }
+
+  if (current_level == nullptr || mode == ERuntimeMode::FAILED) {
     delay(1000);
     log_e("no current level");
     return;
   }
+
   pixels.fill(Adafruit_NeoPixel::Color(0, 0, 0));
 
   auto now = millis();
@@ -173,4 +267,10 @@ void loop(void) {
   }
 
   pixels.show();
+
+  if (now > last_message_time && last_message_time > 0 && now - last_message_time > max_nomessage_time) {
+    log_e("message not received in a while, moving to disconnected");
+    esp_now_deinit();
+    mode = ERuntimeMode::DISCONNECTED;
+  }
 }
