@@ -214,11 +214,11 @@ void loop(void) {
     return;
   }
 
-  if (now - last_debug_log > 1000) {
+  if (now - last_debug_log > 500) {
     log_e(
       "frame (%d, %d, %d) '%s' result: %d (sent to %02X:%02X:%02X:%02X:%02X:%02X)",
-      x_position,
-      y_position,
+      raw_x,
+      raw_y,
       z_position,
       message_payload.content,
       result,
