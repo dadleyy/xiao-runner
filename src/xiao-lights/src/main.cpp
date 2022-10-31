@@ -36,13 +36,22 @@ enum ERuntimeMode {
 static const uint32_t debug_timer_ms = 2000;
 static const uint32_t max_nomessage_time = 10000;
 
+// Every message received by our esp-now listener will update this gloval state.
 static MessagePayload frame_payload;
+
+// Once received the esp now messages will be parsed into an optional controller input that will be
+// sent into every frame of our game logic.
 static std::optional<ControllerInput> last_input = std::nullopt;
-static std::unique_ptr<const Level> current_level(nullptr);
-static std::unique_ptr<xr::Timer> debug_timer(nullptr);
+
+// Current level and indices into our embedded memory for where levels exist.
 static std::vector<std::pair<const char *, uint32_t>> level_indices;
+static std::unique_ptr<const Level> current_level(nullptr);
 static uint32_t current_level_index = 0;
+
+static std::unique_ptr<xr::Timer> debug_timer(nullptr);
 static Adafruit_NeoPixel pixels(num_pixels, pixel_pin);
+
+// Disconnected state.
 static uint32_t active_wifi_connections = 0;
 static ERuntimeMode mode = ERuntimeMode::DISCONNECTED;
 static uint32_t last_message_time = 0;
@@ -151,6 +160,9 @@ void loop(void) {
   // While we haven't had a client connected for some time, our loop in a single frame until we receive one
   // connection to our access point.
   if (mode == ERuntimeMode::DISCONNECTED) {
+    pixels.fill(Adafruit_NeoPixel::Color(0, 0, 0));
+    pixels.show();
+
     // Start our wifi access point
     WiFi.mode(WIFI_AP);
 
@@ -217,7 +229,6 @@ void loop(void) {
     log_e("no current level");
     return;
   }
-
 
   pixels.fill(Adafruit_NeoPixel::Color(0, 0, 0));
 
